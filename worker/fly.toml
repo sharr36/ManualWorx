@@ -1,0 +1,13 @@
+app = "manualworx-worker"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# No HTTP service — pure background worker
+
+[[vm]]
+  size = "performance-2x"
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 2
