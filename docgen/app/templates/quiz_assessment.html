@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Assessment Quiz</h1>
+<h2>{{ quiz_title | default('Quiz') }}</h2>
+<p>{{ system_area | default('') }} — {{ machine_model | default('') }}</p>
+
+{% if questions %}
+<h2>Questions</h2>
+{% for q in questions %}
+<div style="margin: 12pt 0; padding: 10pt; background: var(--slate-50); border-radius: 4px; page-break-inside: avoid;">
+  <p><strong>{{ loop.index }}. {{ q.question }}</strong></p>
+  {% if q.question_type == 'multiple_choice' and q.options %}
+  <ul style="list-style: upper-alpha;">
+    {% for option in q.options %}
+    <li>{{ option }}</li>
+    {% endfor %}
+  </ul>
+  {% elif q.question_type == 'true_false' %}
+  <p>○ True &nbsp;&nbsp; ○ False</p>
+  {% else %}
+  <p style="border-bottom: 1px solid var(--slate-400); margin-top: 8pt; padding-bottom: 24pt;">&nbsp;</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if show_answers and questions %}
+<div style="page-break-before: always;">
+<h2>Answer Key</h2>
+{% for q in questions %}
+<p><strong>{{ loop.index }}.</strong> {{ q.correct_answer }}
+{% if q.explanation %} — <em>{{ q.explanation }}</em>{% endif %}
+</p>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

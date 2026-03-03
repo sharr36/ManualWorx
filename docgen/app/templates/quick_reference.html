@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Quick Reference Card</h1>
+<h2>{{ machine_model | default('Equipment') }}</h2>
+
+{% if specs_by_system %}
+{% for system_name, specs in specs_by_system.items() %}
+<h3>{{ system_name }}</h3>
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Value</th><th>Confidence</th></tr>
+  </thead>
+  <tbody>
+  {% for spec in specs %}
+    <tr>
+      <td>{{ spec.parameter }}</td>
+      <td><span class="spec-value {{ spec.confidence_level | default('') }}">{{ spec.value }}</span></td>
+      <td>{{ spec.confidence | default('') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+{% endif %}
+
+{% if safety_warnings %}
+<h3>Safety Reminders</h3>
+{% for warning in safety_warnings %}
+<div class="safety-warning">
+  <div class="warning-text">{{ warning }}</div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Service Procedure</h1>
+<h2>{{ procedure_name | default('Procedure') }}</h2>
+<p>{{ machine_model | default('') }} — {{ system_area | default('') }}</p>
+
+{% if safety_warnings %}
+{% for warning in safety_warnings %}
+<div class="safety-warning">
+  <div class="warning-title">⚠ SAFETY WARNING</div>
+  <div class="warning-text">{{ warning }}</div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if estimated_time %}
+<div class="info-callout">
+  <strong>Estimated Time:</strong> {{ estimated_time }}
+  {% if skill_level %} | <strong>Skill Level:</strong> {{ skill_level }}{% endif %}
+</div>
+{% endif %}
+
+{% if tools_required %}
+<h2>Tools Required</h2>
+<ul>
+{% for tool in tools_required %}
+  <li>{{ tool }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+
+{% if steps %}
+<h2>Procedure Steps</h2>
+{% for step in steps %}
+<div class="step">
+  <div class="step-number">{{ loop.index }}</div>
+  <div class="step-content">
+    <strong>{{ step.instruction }}</strong>
+    {% if step.detail %}<p>{{ step.detail }}</p>{% endif %}
+    {% if step.torque_spec %}
+      <p>Torque: <span class="spec-value">{{ step.torque_spec }}</span></p>
+    {% endif %}
+    {% if step.warning %}
+      <div class="safety-warning">
+        <div class="warning-text">{{ step.warning }}</div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if torque_specs %}
+<h2>Torque Specifications</h2>
+<table>
+  <thead>
+    <tr><th>Fastener</th><th>Spec</th><th>Source</th></tr>
+  </thead>
+  <tbody>
+  {% for spec in torque_specs %}
+    <tr>
+      <td>{{ spec.fastener }}</td>
+      <td><span class="spec-value">{{ spec.value }}</span></td>
+      <td class="source-citation">{{ spec.source | default('') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

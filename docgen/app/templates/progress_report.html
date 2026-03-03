@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Learning Progress Report</h1>
+<h2>{{ mechanic_name | default('Mechanic') }}</h2>
+<p>Report generated: {{ report_date | default('') }}</p>
+
+{% if summary %}
+<div class="info-callout">
+  <strong>Overall Progress:</strong> {{ summary.completed_modules }}/{{ summary.total_modules }} modules completed
+  ({{ summary.completion_percent | default(0) }}%)
+</div>
+{% endif %}
+
+{% if paths %}
+<h2>Learning Paths</h2>
+{% for path in paths %}
+<h3>{{ path.title }}</h3>
+<table>
+  <thead>
+    <tr><th>Module</th><th>Status</th><th>Quiz Score</th><th>Time Spent</th></tr>
+  </thead>
+  <tbody>
+  {% for module in path.modules %}
+    <tr>
+      <td>{{ module.name }}</td>
+      <td>{{ module.status }}</td>
+      <td>{% if module.quiz_score is defined %}{{ module.quiz_score }}%{% else %}—{% endif %}</td>
+      <td>{{ module.time_spent | default('—') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+{% endif %}
+
+{% if areas_needing_review %}
+<h2>Areas Needing Review</h2>
+<ul>
+{% for area in areas_needing_review %}
+  <li>{{ area }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

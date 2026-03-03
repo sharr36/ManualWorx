@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Troubleshooting Guide</h1>
+<h2>{{ machine_model | default('Equipment') }} — {{ system_area | default('System') }}</h2>
+
+{% if safety_warnings %}
+{% for warning in safety_warnings %}
+<div class="safety-warning">
+  <div class="warning-title">⚠ SAFETY WARNING</div>
+  <div class="warning-text">{{ warning }}</div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if symptoms %}
+<h2>Reported Symptoms</h2>
+<ul>
+{% for symptom in symptoms %}
+  <li>{{ symptom }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+
+{% if diagnostic_steps %}
+<h2>Diagnostic Steps</h2>
+{% for step in diagnostic_steps %}
+<div class="step">
+  <div class="step-number">{{ loop.index }}</div>
+  <div class="step-content">
+    <strong>{{ step.action }}</strong>
+    {% if step.detail %}<p>{{ step.detail }}</p>{% endif %}
+    {% if step.expected %}<p><em>Expected: {{ step.expected }}</em></p>{% endif %}
+    {% if step.if_fail %}<p>If fail: {{ step.if_fail }}</p>{% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if specs %}
+<h2>Reference Specifications</h2>
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Value</th><th>Confidence</th><th>Source</th></tr>
+  </thead>
+  <tbody>
+  {% for spec in specs %}
+    <tr>
+      <td>{{ spec.parameter }}</td>
+      <td><span class="spec-value {{ spec.confidence_level | default('') }}">{{ spec.value }}</span></td>
+      <td>{{ spec.confidence | default('') }}</td>
+      <td class="source-citation">{{ spec.source | default('') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if parts_needed %}
+<h2>Parts & Tools Needed</h2>
+<table>
+  <thead>
+    <tr><th>Part/Tool</th><th>Part Number</th><th>Qty</th></tr>
+  </thead>
+  <tbody>
+  {% for part in parts_needed %}
+    <tr>
+      <td>{{ part.name }}</td>
+      <td class="spec-value">{{ part.part_number | default('—') }}</td>
+      <td>{{ part.quantity | default(1) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if confidence_score is defined %}
+<div class="confidence-bar">
+  <span class="label">{{ confidence_score }}%</span>
+  <div class="bar">
+    <div class="bar-fill {{ confidence_level | default('moderate') }}" style="width: {{ confidence_score }}%"></div>
+  </div>
+  <span>{{ confidence_level | default('MODERATE') | upper }}</span>
+</div>
+{% endif %}
+{% endblock %}

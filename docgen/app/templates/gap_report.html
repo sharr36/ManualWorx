@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Documentation Gap Report</h1>
+<h2>{{ machine_model | default('Equipment') }} — {{ system_area | default('System') }}</h2>
+
+{% if coverage_score is defined %}
+<div class="confidence-bar">
+  <span class="label">{{ coverage_score }}%</span>
+  <div class="bar">
+    <div class="bar-fill {% if coverage_score >= 80 %}high{% elif coverage_score >= 60 %}moderate{% else %}low{% endif %}" style="width: {{ coverage_score }}%"></div>
+  </div>
+  <span>DOCUMENTATION COVERAGE</span>
+</div>
+{% endif %}
+
+{% if documented %}
+<h2>Documented (Known)</h2>
+<table>
+  <thead>
+    <tr><th>Item</th><th>Coverage</th><th>Source Pages</th></tr>
+  </thead>
+  <tbody>
+  {% for item in documented %}
+    <tr>
+      <td>{{ item.name }}</td>
+      <td>{{ item.coverage | default('Complete') }}</td>
+      <td class="source-citation">{{ item.source_pages | default('') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if gaps %}
+<h2>Gaps (Missing)</h2>
+{% for gap in gaps %}
+<div class="safety-warning" style="border-color: var(--amber-500); background: var(--amber-50);">
+  <div class="warning-title" style="color: var(--amber-500);">⚡ {{ gap.category | default('Gap') }}</div>
+  <div class="warning-text">{{ gap.description }}</div>
+  {% if gap.recommendation %}
+  <p style="margin-top: 4pt;"><strong>Recommendation:</strong> {{ gap.recommendation }}</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if recommendations %}
+<h2>How to Fill These Gaps</h2>
+<ol>
+{% for rec in recommendations %}
+  <li>{{ rec }}</li>
+{% endfor %}
+</ol>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Training Lesson</h1>
+<h2>{{ lesson_title | default('Lesson') }}</h2>
+<p>{{ system_area | default('') }} — {{ machine_model | default('') }}</p>
+
+{% if learning_objectives %}
+<div class="info-callout">
+  <strong>Learning Objectives:</strong>
+  <ul>
+  {% for obj in learning_objectives %}
+    <li>{{ obj }}</li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if sections %}
+{% for section in sections %}
+<h2>{{ section.heading }}</h2>
+
+{% if section.diagram_url %}
+<div style="text-align: center; margin: 12pt 0;">
+  <img src="{{ section.diagram_url }}" alt="{{ section.heading }}" style="max-width: 100%; height: auto;">
+</div>
+{% endif %}
+
+{{ section.body | safe }}
+
+{% if section.key_concepts %}
+<div class="info-callout">
+  <strong>Key Concepts:</strong>
+  <ul>
+  {% for concept in section.key_concepts %}
+    <li>{{ concept }}</li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if review_questions %}
+<h2>Check Your Understanding</h2>
+<ol>
+{% for q in review_questions %}
+  <li style="margin-bottom: 12pt;">
+    <strong>{{ q.question }}</strong>
+    {% if q.hint %}<br><em class="source-citation">Hint: {{ q.hint }}</em>{% endif %}
+  </li>
+{% endfor %}
+</ol>
+{% endif %}
+{% endblock %}

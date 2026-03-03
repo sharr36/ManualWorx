@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>System Analysis Report</h1>
+<h2>{{ machine_model | default('Equipment') }} — {{ system_area | default('System') }}</h2>
+
+{% if overall_confidence is defined %}
+<div class="confidence-bar">
+  <span class="label">{{ overall_confidence }}%</span>
+  <div class="bar">
+    <div class="bar-fill {{ confidence_level | default('moderate') }}" style="width: {{ overall_confidence }}%"></div>
+  </div>
+  <span>{{ confidence_level | default('MODERATE') | upper }} CONFIDENCE</span>
+</div>
+{% endif %}
+
+{% if components %}
+<h2>Identified Components</h2>
+<table>
+  <thead>
+    <tr><th>Component</th><th>Type</th><th>Designator</th><th>Confidence</th><th>Source</th></tr>
+  </thead>
+  <tbody>
+  {% for comp in components %}
+    <tr>
+      <td>{{ comp.name }}</td>
+      <td>{{ comp.component_type | default('') }}</td>
+      <td><span class="spec-value">{{ comp.designator | default('—') }}</span></td>
+      <td>{{ comp.confidence | default('') }}</td>
+      <td class="source-citation">{{ comp.source | default('') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if inferred_specs %}
+<h2>Inferred Specifications</h2>
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Value</th><th>Confidence</th><th>Inferred From</th></tr>
+  </thead>
+  <tbody>
+  {% for spec in inferred_specs %}
+    <tr>
+      <td>{{ spec.parameter }}</td>
+      <td><span class="spec-value {{ spec.confidence_level | default('') }}">{{ spec.value }}</span></td>
+      <td>{{ spec.confidence | default('') }}</td>
+      <td class="source-citation">{{ spec.inferred_from | default('') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if connections %}
+<h2>System Connections</h2>
+{% for conn in connections %}
+<p>{{ conn.from_component }} → {{ conn.to_component }}
+{% if conn.flow_type %}({{ conn.flow_type }}){% endif %}
+</p>
+{% endfor %}
+{% endif %}
+{% endblock %}

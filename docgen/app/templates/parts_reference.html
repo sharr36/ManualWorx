@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Parts Reference</h1>
+<h2>{{ machine_model | default('Equipment') }} — {{ system_area | default('Assembly') }}</h2>
+
+{% if diagram_url %}
+<div style="text-align: center; margin: 16pt 0;">
+  <img src="{{ diagram_url }}" alt="Exploded view" style="max-width: 100%; height: auto;">
+</div>
+{% endif %}
+
+{% if parts %}
+<h2>Parts List</h2>
+<table>
+  <thead>
+    <tr><th>Callout</th><th>Part Number</th><th>Description</th><th>Qty</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+  {% for part in parts %}
+    <tr>
+      <td style="font-weight: 600;">{{ part.callout | default('') }}</td>
+      <td><span class="spec-value">{{ part.part_number }}</span></td>
+      <td>{{ part.description }}</td>
+      <td>{{ part.quantity | default(1) }}</td>
+      <td class="source-citation">{{ part.notes | default('') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
