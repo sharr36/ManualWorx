@@ -9,7 +9,19 @@ from .config import settings
 from .database import create_pool, run_migrations
 from .middleware.auth import AuthMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
-from .routers import auth, health, tenants, users
+from .routers import (
+    analyze,
+    auth,
+    billing,
+    documents,
+    health,
+    manuals,
+    query,
+    teaching,
+    tenants,
+    users,
+    viewer,
+)
 
 
 @asynccontextmanager
@@ -92,3 +104,11 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(tenants.router)
 app.include_router(users.router)
+app.include_router(billing.router)
+app.include_router(billing.webhook_router)
+app.include_router(manuals.router)
+app.include_router(query.router)
+app.include_router(documents.router)
+app.include_router(teaching.router)
+app.include_router(viewer.router)
+app.include_router(analyze.router)
