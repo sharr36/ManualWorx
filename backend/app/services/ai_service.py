@@ -1,8 +1,11 @@
 """AI reasoning service — Anthropic Claude integration."""
 
 import json
+import logging
 import time
 from collections.abc import AsyncGenerator
+
+logger = logging.getLogger(__name__)
 
 import anthropic
 
@@ -321,8 +324,8 @@ Return format: [0.8, 0.3, 0.95, ...]"""
                 for i, score in enumerate(scores):
                     if i < len(passages):
                         passages[i]["score"] = float(score)
-        except Exception:
-            pass  # Keep original scores on failure
+        except Exception as e:
+            logger.warning("Reranking failed, keeping original scores: %s", e)
 
         passages.sort(key=lambda x: x.get("score", 0), reverse=True)
         return passages
@@ -377,8 +380,8 @@ Return ONLY a JSON array:
                     {"query": s.get("query", ""), "reason": s.get("reason", "")}
                     for s in suggestions[:3]
                 ]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Refinement suggestion generation failed: %s", e)
 
         return []
 
@@ -528,8 +531,8 @@ Important:
             mode = response.content[0].text.strip().lower().strip('"')
             if mode in ("qa", "troubleshoot", "diagram", "procedure"):
                 return mode
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Auto-detect mode failed, defaulting to QA: %s", e)
         return "qa"
 
     def _select_prompt(

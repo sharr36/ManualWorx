@@ -1,6 +1,7 @@
 """Query orchestration service — ties retrieval and AI together."""
 
 import json
+import logging
 import time
 from collections.abc import AsyncGenerator
 from datetime import datetime
@@ -9,6 +10,8 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 from ..database import set_tenant_context
 from .ai_service import AIService
 from .confidence_service import ConfidenceService
@@ -123,8 +126,8 @@ class QueryService:
                 sources=ai_result["sources"],
                 context_chunks=chunks,
             )
-        except Exception:
-            pass  # Claim scoring is non-critical
+        except Exception as e:
+            logger.warning("Claim scoring failed for query %s: %s", query_id, e)
 
         # Use aggregated claim confidence if available
         final_confidence = ai_result["confidence_score"]
@@ -145,8 +148,8 @@ class QueryService:
                     confidence_score=final_confidence,
                     claims=claims_list,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Refinement suggestions failed: %s", e)
 
         # 7. Increment usage counter
         if redis:
@@ -155,8 +158,8 @@ class QueryService:
             try:
                 await redis.incr(usage_key)
                 await redis.expire(usage_key, 86400 * 35)  # 35 days TTL
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Redis usage increment failed: %s", e)
 
         return {
             "id": str(query_id),
@@ -230,8 +233,8 @@ class QueryService:
                 try:
                     payload = json.loads(event.replace("data: ", "").strip())
                     done_data = payload
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to parse SSE done event: %s", e)
 
         if not done_data:
             return
@@ -275,8 +278,8 @@ class QueryService:
                     cost_estimate,
                     total_latency,
                 )
-        except Exception:
-            pass  # Don't fail the stream if DB write fails
+        except Exception as e:
+            logger.warning("Failed to persist streamed query: %s", e)
 
         # 4. Per-claim scoring + refinement suggestions (post-stream)
         try:
@@ -301,8 +304,8 @@ class QueryService:
                 )
 
             yield f"data: {json.dumps({'type': 'claims', 'query_id': str(query_id), 'claims': claims, 'overall_confidence': overall, 'contradiction_count': claim_result.get('contradiction_count', 0), 'safety_claims': claim_result.get('safety_claims', 0), 'refinements': refinements})}\n\n"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Post-stream claim scoring failed: %s", e)
 
         # 5. Increment usage counter
         if redis:
@@ -311,8 +314,8 @@ class QueryService:
             try:
                 await redis.incr(usage_key)
                 await redis.expire(usage_key, 86400 * 35)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Redis usage increment failed: %s", e)
 
     async def _get_session_history(
         self, pool: asyncpg.Pool, tenant_id: UUID, session_id: UUID, limit: int = 5
@@ -466,31 +469,32 @@ class QueryService:
         if not row:
             return None
 
-        # Fetch source pages
+        # Fetch source pages (batch query instead of N+1)
         sources = []
         if row["retrieved_page_ids"]:
+            page_ids = row["retrieved_page_ids"][:10]
             async with pool.acquire() as conn:
-                for pid in row["retrieved_page_ids"][:10]:
-                    page = await conn.fetchrow(
-                        """
-                        SELECT p.id, p.page_number, p.classification,
-                               LEFT(p.extracted_text, 200) as text_preview,
-                               m.title as manual_title
-                        FROM pages p
-                        JOIN manuals m ON p.manual_id = m.id
-                        WHERE p.id = $1
-                        """,
-                        pid,
-                    )
-                    if page:
-                        sources.append({
-                            "page_id": str(page["id"]),
-                            "page_number": page["page_number"],
-                            "classification": page["classification"],
-                            "text_preview": page["text_preview"] or "",
-                            "relevance_score": 0.0,
-                            "manual_title": page["manual_title"],
-                        })
+                pages = await conn.fetch(
+                    """
+                    SELECT p.id, p.page_number, p.classification,
+                           LEFT(p.extracted_text, 200) as text_preview,
+                           m.title as manual_title
+                    FROM pages p
+                    JOIN manuals m ON p.manual_id = m.id
+                    WHERE p.id = ANY($1::uuid[])
+                    ORDER BY p.page_number
+                    """,
+                    page_ids,
+                )
+                for page in pages:
+                    sources.append({
+                        "page_id": str(page["id"]),
+                        "page_number": page["page_number"],
+                        "classification": page["classification"],
+                        "text_preview": page["text_preview"] or "",
+                        "relevance_score": 0.0,
+                        "manual_title": page["manual_title"],
+                    })
 
         return {
             "id": str(row["id"]),

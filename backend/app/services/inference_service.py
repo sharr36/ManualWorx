@@ -1,7 +1,10 @@
 """Inference engine service — fills documentation gaps (Phase 6)."""
 
 import json
+import logging
 from uuid import UUID, uuid4
+
+logger = logging.getLogger(__name__)
 
 import anthropic
 

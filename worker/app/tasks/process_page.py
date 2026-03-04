@@ -1,8 +1,11 @@
 """Single page processing task — can be used for re-processing individual pages."""
 
 import asyncio
+import logging
 from functools import partial
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from ..pipeline.ocr_processor import OCRProcessor
 from ..pipeline.pdf_splitter import PDFSplitter

@@ -1,6 +1,9 @@
 """Embedding generation task — generates embeddings for chunks and upserts to Qdrant."""
 
+import logging
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from ..pipeline.embedder import Embedder
 
@@ -46,6 +49,7 @@ async def generate_embeddings(ctx: dict, chunk_ids: list[str]) -> dict:
                 })
 
     if not chunks:
+        logger.info("No chunks found for IDs: %s", chunk_ids[:5])
         return {"status": "ok", "count": 0}
 
     # Group by manual for efficient embedding

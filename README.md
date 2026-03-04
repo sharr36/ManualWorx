@@ -104,15 +104,15 @@ make deploy
 | Phase | Weeks | Focus |
 |-------|-------|-------|
 | 0 | 1-2 | Foundation (auth, billing, multi-tenancy) ✅ |
-| 1 | 3-5 | PDF ingestion + basic query |
-| 2 | 5-7 | Advanced retrieval + page classification |
-| 3 | 7-9 | Query refinement + confidence scoring |
-| 4 | 9-11 | Document generation |
-| 5 | 11-14 | Interactive schematic viewer |
-| 6 | 14-17 | Inference engine |
-| 7 | 17-19 | Advanced query + diagrams |
-| 8 | 19-22 | Teaching mode |
-| 9 | 22-24 | Polish + optimization |
+| 1 | 3-5 | PDF ingestion + basic query ✅ |
+| 2 | 5-7 | Advanced retrieval + page classification ✅ |
+| 3 | 7-9 | Query refinement + confidence scoring ✅ |
+| 4 | 9-11 | Document generation ✅ |
+| 5 | 11-14 | Interactive schematic viewer ✅ |
+| 6 | 14-17 | Inference engine ✅ |
+| 7 | 17-19 | Advanced query + diagrams ✅ |
+| 8 | 19-22 | Teaching mode ✅ |
+| 9 | 22-24 | Polish + optimization ✅ |
 | 10 | 24-26 | Launch preparation |
 
 ## Tech Stack

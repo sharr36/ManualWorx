@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatMessage } from "@/components/query/chat-message";
 import { SourceCitation } from "@/components/query/source-citation";
+import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import type { Manual, ConfidenceLevel, Claim, RefinementSuggestion } from "@/types";
 
@@ -233,12 +234,12 @@ export default function QueryPage() {
         const ready = data.filter((m) => m.upload_status === "ready");
         setManuals(ready);
       })
-      .catch(() => {});
+      .catch((e: Error) => toast.error(e.message || "Failed to load manuals"));
 
     api
       .get<HistoryItem[]>("/api/query/history?limit=30")
       .then(setHistory)
-      .catch(() => {});
+      .catch((e: Error) => toast.error(e.message || "Failed to load history"));
   }, []);
 
   useEffect(() => {
@@ -267,7 +268,9 @@ export default function QueryPage() {
       ]);
       setLastSources(result.sources || []);
       setShowHistory(false);
-    } catch {}
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to load query");
+    }
   }, []);
 
   const submitQuery = useCallback(
@@ -334,7 +337,7 @@ export default function QueryPage() {
             api
               .get<HistoryItem[]>("/api/query/history?limit=30")
               .then(setHistory)
-              .catch(() => {});
+              .catch(() => {});  // non-critical refresh
           },
           // onError
           (error) => {
@@ -406,8 +409,8 @@ export default function QueryPage() {
         });
         // Navigate to documents page on success
         window.location.href = "/documents";
-      } catch {
-        alert("Failed to generate document. Please try again.");
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : "Failed to generate document");
       }
     },
     []

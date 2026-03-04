@@ -2,7 +2,10 @@
 
 import io
 import json
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -453,8 +456,8 @@ class DocumentService:
         if doc["file_url"]:
             try:
                 await self.storage.delete(doc["file_url"])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to delete document file %s: %s", doc["file_url"], e)
 
         # Delete from DB
         async with pool.acquire() as conn:

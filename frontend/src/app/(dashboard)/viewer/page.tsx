@@ -218,14 +218,16 @@ export default function ViewerPage() {
       {/* Toolbar */}
       <div className="flex items-center gap-3 rounded-lg border bg-white p-3">
         <div className="flex items-center gap-2">
-          <label className="text-xs text-muted-foreground">Zoom</label>
+          <label htmlFor="zoom-slider" className="text-xs text-muted-foreground">Zoom</label>
           <input
+            id="zoom-slider"
             type="range"
             min="25"
             max="300"
             value={zoom}
             onChange={(e) => setZoom(Number(e.target.value))}
             className="w-24"
+            aria-label="Zoom level"
           />
           <span className="w-10 text-xs text-muted-foreground">{zoom}%</span>
         </div>
@@ -236,6 +238,7 @@ export default function ViewerPage() {
             size="sm"
             onClick={() => setMode("select")}
             title="Select mode"
+            aria-label="Select mode"
           >
             <MousePointer className="h-3.5 w-3.5" />
           </Button>
@@ -244,6 +247,7 @@ export default function ViewerPage() {
             size="sm"
             onClick={() => setMode("pan")}
             title="Pan mode"
+            aria-label="Pan mode"
           >
             <Move className="h-3.5 w-3.5" />
           </Button>
@@ -287,6 +291,7 @@ export default function ViewerPage() {
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             placeholder="Find component..."
+            aria-label="Search components"
             className="rounded-md border py-1 pl-7 pr-2 text-sm"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}

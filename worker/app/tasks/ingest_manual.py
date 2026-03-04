@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import traceback
 from functools import partial
 from uuid import UUID
@@ -10,6 +11,8 @@ from ..pipeline.chunker import Chunker
 from ..pipeline.embedder import Embedder
 from ..pipeline.ocr_processor import OCRProcessor
 from ..pipeline.pdf_splitter import PDFSplitter
+
+logger = logging.getLogger(__name__)
 
 
 async def _publish_progress(ctx: dict, manual_id: str, stage: str, page: int = 0, total: int = 0):
@@ -20,8 +23,8 @@ async def _publish_progress(ctx: dict, manual_id: str, stage: str, page: int = 0
     try:
         msg = json.dumps({"stage": stage, "page": page, "total": total, "manual_id": manual_id})
         await redis.publish(f"progress:{manual_id}", msg)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to publish progress for manual %s: %s", manual_id, e)
 
 
 async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
@@ -40,6 +43,8 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
     s3 = ctx["s3"]
     bucket = ctx["bucket"]
     config = ctx["config"]
+
+    logger.info("Starting ingestion for manual %s (tenant %s)", manual_id, tenant_id)
 
     try:
         # 1. Update status to 'processing'
@@ -196,8 +201,8 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                     await arq_redis.enqueue_job(
                         "classify_pages", manual_id, page_ids_for_classify
                     )
-            except Exception:
-                pass  # Classification is non-critical enhancement
+            except Exception as e:
+                logger.warning("Failed to enqueue classification job: %s", e)
 
         return {
             "status": "ready",
@@ -207,6 +212,7 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
         }
 
     except Exception as e:
+        logger.error("Ingestion failed for manual %s: %s", manual_id, e, exc_info=True)
         # Update status to 'failed'
         try:
             async with pool.acquire() as conn:
@@ -214,8 +220,8 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                     "UPDATE manuals SET upload_status = 'failed', updated_at = NOW() WHERE id = $1",
                     UUID(manual_id),
                 )
-        except Exception:
-            pass
+        except Exception as db_err:
+            logger.error("Failed to update manual %s status to 'failed': %s", manual_id, db_err)
 
         return {
             "status": "failed",

@@ -1,8 +1,11 @@
 """Page classification task — refines heuristic classifications using Claude vision."""
 
 import asyncio
+import logging
 from functools import partial
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from ..pipeline.page_classifier import PageClassifier
 
@@ -63,7 +66,8 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
                 partial(s3.get_object, Bucket=bucket, Key=image_key),
             )
             image_bytes = response["Body"].read()
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to fetch page image %s: %s", image_key, e)
             image_bytes = b""
 
         page_data_list.append({
@@ -114,8 +118,8 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
                         payload={"classification": new_classification},
                         points=[chunk_row["vector_id"]],
                     )
-            except Exception:
-                pass  # Non-critical — search still works with old classification
+            except Exception as e:
+                logger.warning("Failed to update Qdrant payload for page %s: %s", page_data["page_id"], e)
 
         updated += 1
 

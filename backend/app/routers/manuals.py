@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 
 from ..models.manual import ManualDetailResponse, ManualResponse, PageResponse
 from ..services.manual_service import ManualService
-from manualworx_shared.constants import ManualType, UserRole
+from manualworx_shared.constants import ManualType, UserRole, MAX_UPLOAD_BYTES
 
 router = APIRouter(prefix="/api/manuals", tags=["manuals"])
 _service = ManualService()
@@ -43,6 +43,17 @@ async def upload_manual(
 
     pdf_bytes = await file.read()
 
+    # Validate file size
+    if len(pdf_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
+
+    # Sanitize filename — strip path components to prevent path traversal
+    import os
+    safe_filename = os.path.basename(file.filename or "upload.pdf")
+
     try:
         result = await _service.upload_manual(
             pool=pool,
@@ -53,7 +64,7 @@ async def upload_manual(
             model=model,
             manual_type=manual_type,
             pdf_bytes=pdf_bytes,
-            filename=file.filename,
+            filename=safe_filename,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

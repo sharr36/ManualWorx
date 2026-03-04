@@ -14,6 +14,7 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
@@ -99,8 +100,8 @@ export default function TeachPage() {
     try {
       const data = await api.get<LearningPath[]>("/api/paths");
       setPaths(data);
-    } catch {
-      // No paths yet
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to load learning paths");
     } finally {
       setLoadingPaths(false);
     }
@@ -120,8 +121,8 @@ export default function TeachPage() {
       });
       setAssistSession(data);
       setView("assist");
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setAssistLoading(false);
     }
@@ -154,8 +155,8 @@ export default function TeachPage() {
         });
       }
       setView("lesson");
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setLessonLoading(false);
     }
@@ -175,8 +176,8 @@ export default function TeachPage() {
         system_area: assistSession.system_area,
       });
       setView("lesson");
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setLessonLoading(false);
     }
@@ -198,8 +199,8 @@ export default function TeachPage() {
       setAnswers({});
       setQuizResults(null);
       setView("quiz");
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setQuizLoading(false);
     }
@@ -220,8 +221,8 @@ export default function TeachPage() {
       });
       setQuizResults(data);
       setView("results");
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setQuizLoading(false);
     }
@@ -235,7 +236,7 @@ export default function TeachPage() {
     api
       .get<{ id: string; title: string }[]>("/api/manuals")
       .then(setManuals)
-      .catch(() => {});
+      .catch((e: Error) => toast.error(e.message || "Failed to load manuals"));
   }, []);
 
   const generatePath = async (manualId: string) => {
@@ -247,8 +248,8 @@ export default function TeachPage() {
       setPaths((prev) => [path, ...prev]);
       setSelectedPath(path);
       setView("path");
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setGenLoading(false);
     }

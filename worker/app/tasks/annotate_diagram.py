@@ -2,9 +2,12 @@
 
 import base64
 import json
+import logging
 import time
 
 import anthropic
+
+logger = logging.getLogger(__name__)
 
 
 ANNOTATION_PROMPT = """Analyze this technical diagram from a heavy equipment service manual.
@@ -142,9 +145,14 @@ async def annotate_diagram(ctx: dict, page_id: str) -> dict:
     start_idx = text.find("{")
     end_idx = text.rfind("}") + 1
     if start_idx < 0 or end_idx <= start_idx:
+        logger.warning("Failed to parse annotation JSON for page %s", page_id)
         return {"status": "error", "detail": "Failed to parse annotation response"}
 
-    result = json.loads(text[start_idx:end_idx])
+    try:
+        result = json.loads(text[start_idx:end_idx])
+    except json.JSONDecodeError as e:
+        logger.warning("Invalid annotation JSON for page %s: %s", page_id, e)
+        return {"status": "error", "detail": "Invalid JSON in annotation response"}
 
     components = result.get("components", [])
     connections = result.get("connections", [])

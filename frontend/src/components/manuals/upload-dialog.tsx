@@ -2,12 +2,16 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Upload, X, FileText } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api-client";
 import type { Manual } from "@/types";
+
+const MAX_FILE_SIZE_MB = 100;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 interface UploadDialogProps {
   open: boolean;
@@ -48,7 +52,12 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     setDragOver(false);
     const dropped = e.dataTransfer.files[0];
     if (dropped?.type === "application/pdf") {
+      if (dropped.size > MAX_FILE_SIZE_BYTES) {
+        setError(`File too large. Maximum size is ${MAX_FILE_SIZE_MB} MB`);
+        return;
+      }
       setFile(dropped);
+      setError("");
       if (!title) setTitle(dropped.name.replace(/\.pdf$/i, ""));
     } else {
       setError("Only PDF files are accepted");
@@ -59,6 +68,10 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const selected = e.target.files?.[0];
       if (selected) {
+        if (selected.size > MAX_FILE_SIZE_BYTES) {
+          setError(`File too large. Maximum size is ${MAX_FILE_SIZE_MB} MB`);
+          return;
+        }
         setFile(selected);
         if (!title) setTitle(selected.name.replace(/\.pdf$/i, ""));
         setError("");
@@ -80,10 +93,11 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
         model: model.trim() || "",
         manual_type: manualType,
       });
+      toast.success("Manual uploaded — processing started");
       reset();
       onSuccess(result);
     } catch (err: any) {
-      setError(err.detail || "Upload failed");
+      setError(err.detail || err.message || "Upload failed");
       setUploading(false);
     }
   }, [file, title, make, model, manualType, reset, onSuccess]);

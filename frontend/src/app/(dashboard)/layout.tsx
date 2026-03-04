@@ -5,6 +5,8 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Toaster } from "@/components/ui/sonner";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const { user, tenant, isLoading } = useAuth();
@@ -37,8 +39,11 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onMenuClick={() => setSidebarOpen(true)} />
         <main className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto max-w-[1280px]">{children}</div>
+          <ErrorBoundary>
+            <div className="mx-auto max-w-[1280px]">{children}</div>
+          </ErrorBoundary>
         </main>
+        <Toaster position="bottom-right" richColors />
       </div>
     </div>
   );

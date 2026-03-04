@@ -7,6 +7,7 @@ import {
   Loader2,
   Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -69,7 +70,8 @@ export default function DocumentsPage() {
       const params = filter ? `?doc_type=${filter}` : "";
       const data = await api.get<DocItem[]>(`/api/documents${params}`);
       setDocs(data);
-    } catch {
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to load documents");
       setDocs([]);
     } finally {
       setLoading(false);
@@ -87,7 +89,9 @@ export default function DocumentsPage() {
     try {
       await api.delete(`/api/documents/${id}`);
       setDocs((prev) => prev.filter((d) => d.id !== id));
-    } catch {
+      toast.success("Document deleted");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete document");
     } finally {
       setDeleting(null);
     }

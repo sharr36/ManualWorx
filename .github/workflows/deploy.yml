@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy-api:
     name: Deploy API
@@ -11,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --config backend/fly.toml --dockerfile backend/Dockerfile
+      - run: flyctl deploy --config backend/fly.toml --dockerfile backend/Dockerfile --wait-timeout 120
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
@@ -21,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --config frontend/fly.toml --dockerfile frontend/Dockerfile
+      - run: flyctl deploy --config frontend/fly.toml --dockerfile frontend/Dockerfile --wait-timeout 120
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
@@ -31,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --config worker/fly.toml --dockerfile worker/Dockerfile
+      - run: flyctl deploy --config worker/fly.toml --dockerfile worker/Dockerfile --wait-timeout 120
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
@@ -41,6 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --config docgen/fly.toml --dockerfile docgen/Dockerfile
+      - run: flyctl deploy --config docgen/fly.toml --dockerfile docgen/Dockerfile --wait-timeout 120
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

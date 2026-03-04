@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -42,7 +43,7 @@ export default function DashboardPage() {
           ).length,
         });
       })
-      .catch(() => {});
+      .catch((e: Error) => toast.error(e.message || "Failed to load dashboard stats"));
   }, []);
 
   if (!user || !tenant) return null;

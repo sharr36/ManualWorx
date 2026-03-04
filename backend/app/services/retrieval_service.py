@@ -1,7 +1,10 @@
 """Vector retrieval service — embeds queries and searches Qdrant."""
 
+import logging
 import re
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 import asyncpg
 
@@ -65,46 +68,51 @@ class RetrievalService:
         if not results:
             return []
 
-        # Fetch full chunk + page data from DB
+        # Fetch full chunk + page data from DB (batch query)
         chunk_ids = [r.payload.get("chunk_id") for r in results]
         score_map = {r.payload.get("chunk_id"): r.score for r in results}
 
         enriched = []
+        try:
+            chunk_uuids = [UUID(cid) for cid in chunk_ids if cid]
+        except (ValueError, TypeError) as e:
+            logger.warning("Invalid chunk IDs from Qdrant: %s", e)
+            return []
+
         async with pool.acquire() as conn:
             await set_tenant_context(conn, tenant_id)
-            for chunk_id in chunk_ids:
-                try:
-                    row = await conn.fetchrow(
-                        """
-                        SELECT c.id as chunk_id, c.chunk_text, c.chunk_index,
-                               p.id as page_id, p.page_number, p.classification,
-                               p.has_table, p.has_diagram, p.extracted_text,
-                               m.id as manual_id, m.title as manual_title
-                        FROM chunks c
-                        JOIN pages p ON c.page_id = p.id
-                        JOIN manuals m ON p.manual_id = m.id
-                        WHERE c.id = $1
-                        """,
-                        UUID(chunk_id),
-                    )
-                except Exception:
-                    continue
+            rows = await conn.fetch(
+                """
+                SELECT c.id as chunk_id, c.chunk_text, c.chunk_index,
+                       p.id as page_id, p.page_number, p.classification,
+                       p.has_table, p.has_diagram, p.extracted_text,
+                       m.id as manual_id, m.title as manual_title
+                FROM chunks c
+                JOIN pages p ON c.page_id = p.id
+                JOIN manuals m ON p.manual_id = m.id
+                WHERE c.id = ANY($1::uuid[])
+                """,
+                chunk_uuids,
+            )
+            row_map = {str(r["chunk_id"]): r for r in rows}
 
-                if row:
-                    enriched.append({
-                        "chunk_id": str(row["chunk_id"]),
-                        "page_id": str(row["page_id"]),
-                        "page_number": row["page_number"],
-                        "chunk_text": row["chunk_text"],
-                        "chunk_index": row["chunk_index"],
-                        "classification": row["classification"],
-                        "has_table": row["has_table"],
-                        "has_diagram": row["has_diagram"],
-                        "manual_id": str(row["manual_id"]),
-                        "manual_title": row["manual_title"],
-                        "score": score_map.get(chunk_id, 0.0),
-                        "full_page_text": row["extracted_text"],
-                    })
+        for chunk_id in chunk_ids:
+            row = row_map.get(chunk_id)
+            if row:
+                enriched.append({
+                    "chunk_id": str(row["chunk_id"]),
+                    "page_id": str(row["page_id"]),
+                    "page_number": row["page_number"],
+                    "chunk_text": row["chunk_text"],
+                    "chunk_index": row["chunk_index"],
+                    "classification": row["classification"],
+                    "has_table": row["has_table"],
+                    "has_diagram": row["has_diagram"],
+                    "manual_id": str(row["manual_id"]),
+                    "manual_title": row["manual_title"],
+                    "score": score_map.get(chunk_id, 0.0),
+                    "full_page_text": row["extracted_text"],
+                })
 
         enriched.sort(key=lambda x: x["score"], reverse=True)
         return enriched
@@ -222,8 +230,8 @@ class RetrievalService:
                             chunk["annotation_data"] = _json.loads(ad) if isinstance(ad, str) else ad
                             os_data = ann["operating_states"]
                             chunk["operating_states"] = (_json.loads(os_data) if isinstance(os_data, str) else os_data) or []
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to load diagram annotation for page %s: %s", chunk["page_id"], e)
 
         return chunks
 

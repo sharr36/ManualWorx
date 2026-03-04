@@ -240,3 +240,27 @@ PERMISSIONS = {
     "verify_annotations": [UserRole.OWNER, UserRole.MANAGER],
     "manage_api_keys": [UserRole.OWNER],
 }
+
+# --- Operational constants (Phase 9: Polish) ---
+
+# Timeouts (seconds)
+AI_API_TIMEOUT = 60
+EMBEDDING_TIMEOUT = 30
+OCR_TIMEOUT = 120
+STORAGE_TIMEOUT = 30
+
+# Pagination defaults
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
+# Upload limits
+MAX_UPLOAD_MB = 100
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+ALLOWED_UPLOAD_TYPES = {"application/pdf"}
+
+# Rate limit cache TTL (seconds) — how long to cache tenant query limits in Redis
+RATE_LIMIT_CACHE_TTL = 300  # 5 minutes
+
+# Worker retry configuration
+WORKER_MAX_RETRIES = 3
+WORKER_RETRY_BACKOFF_BASE = 2  # exponential: 2s, 4s, 8s

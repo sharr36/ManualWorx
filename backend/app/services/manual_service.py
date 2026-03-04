@@ -1,6 +1,9 @@
 """Manual management service — upload, CRUD, and status tracking."""
 
+import logging
 from uuid import UUID, uuid4
+
+logger = logging.getLogger(__name__)
 
 import asyncpg
 from arq.connections import ArqRedis, create_pool as create_arq_pool
@@ -206,8 +209,8 @@ class ManualService:
                     ]
                 ),
             )
-        except Exception:
-            pass  # Non-critical: orphaned vectors will be ignored
+        except Exception as e:
+            logger.warning("Failed to delete Qdrant vectors for manual %s: %s", manual_id, e)
 
         # Delete from storage
         try:
@@ -216,8 +219,8 @@ class ManualService:
             # Delete known keys
             if row["original_pdf_url"]:
                 await storage.delete(row["original_pdf_url"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to delete storage files for manual %s: %s", manual_id, e)
 
         return True
 

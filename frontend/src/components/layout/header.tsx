@@ -39,6 +39,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           size="icon"
           className="lg:hidden"
           onClick={onMenuClick}
+          aria-label="Open menu"
         >
           <Menu className="h-5 w-5" />
         </Button>
@@ -63,11 +64,12 @@ export function Header({ onMenuClick }: HeaderProps) {
           variant="ghost"
           size="icon"
           onClick={() => router.push("/settings")}
+          aria-label="Settings"
         >
           <Settings className="h-4 w-4" />
         </Button>
 
-        <Button variant="ghost" size="icon" onClick={handleLogout}>
+        <Button variant="ghost" size="icon" onClick={handleLogout} aria-label="Log out">
           <LogOut className="h-4 w-4" />
         </Button>
       </div>

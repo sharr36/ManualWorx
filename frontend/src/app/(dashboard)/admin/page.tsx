@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ export default function AdminPage() {
   const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
-    api.get<User[]>("/api/users").then(setUsers).catch(() => {});
+    api.get<User[]>("/api/users").then(setUsers).catch((e: Error) => toast.error(e.message || "Failed to load users"));
   }, []);
 
   if (!user || (user.role !== "owner" && user.role !== "manager")) {
@@ -43,19 +44,22 @@ export default function AdminPage() {
       setShowInvite(false);
       setInviteEmail("");
       setInviteName("");
-    } catch {
-      // error handling
+      toast.success("Invitation sent");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to invite user");
     } finally {
       setInviting(false);
     }
   };
 
   const handleRemove = async (userId: string) => {
+    if (!window.confirm("Are you sure you want to remove this user?")) return;
     try {
       await api.delete(`/api/users/${userId}`);
       setUsers((prev) => prev.filter((u) => u.id !== userId));
-    } catch {
-      // error handling
+      toast.success("User removed");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to remove user");
     }
   };
 

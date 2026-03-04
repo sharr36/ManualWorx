@@ -1,7 +1,10 @@
 """Confidence scoring service — per-claim extraction, scoring, and attribution."""
 
 import json
+import logging
 from uuid import UUID, uuid4
+
+logger = logging.getLogger(__name__)
 
 import anthropic
 import asyncpg
@@ -220,8 +223,8 @@ class ConfidenceService:
                         "contradictions": [],
                     })
                 return validated
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Claim extraction failed: %s", e)
 
         return []
 
@@ -259,8 +262,8 @@ class ConfidenceService:
             end = text.rfind("]") + 1
             if start >= 0 and end > start:
                 return json.loads(text[start:end])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Contradiction check failed: %s", e)
 
         return []
 

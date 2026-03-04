@@ -20,6 +20,7 @@ import { ComingSoon } from "@/components/ui/coming-soon";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { formatDate } from "@/lib/utils";
 import type { CoverageAnalysis, GapAnalysis, InferredComponent, Manual, Page } from "@/types";
@@ -67,11 +68,12 @@ export default function ManualDetailPage() {
       try {
         const [m, p] = await Promise.all([
           api.get<ManualDetail>(`/api/manuals/${manualId}`),
-          api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []),
+          api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => [] as Page[]),
         ]);
         setManual(m);
         setPages(p);
-      } catch {
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : "Failed to load manual");
         router.push("/manuals");
       } finally {
         setLoading(false);
@@ -141,8 +143,11 @@ export default function ManualDetailPage() {
     if (!confirm("Delete this manual and all its data?")) return;
     try {
       await api.delete(`/api/manuals/${manualId}`);
+      toast.success("Manual deleted");
       router.push("/manuals");
-    } catch {}
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete manual");
+    }
   };
 
   if (loading) {
@@ -474,8 +479,8 @@ function AnalysisTab({ manualId, manualReady }: { manualId: string; manualReady:
         });
         setComponents(result.components || []);
       }
-    } catch {
-      // analysis failed
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Analysis failed");
     } finally {
       setLoading(false);
     }

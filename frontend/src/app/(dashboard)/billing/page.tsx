@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api-client";
 import { redirectToCheckout, redirectToPortal } from "@/lib/stripe";
@@ -70,7 +71,7 @@ export default function BillingPage() {
   const [usage, setUsage] = useState<UsageInfo | null>(null);
 
   useEffect(() => {
-    api.get<UsageInfo>("/api/billing/usage").then(setUsage).catch(() => {});
+    api.get<UsageInfo>("/api/billing/usage").then(setUsage).catch((e: Error) => toast.error(e.message || "Failed to load usage data"));
   }, []);
 
   if (!tenant || !user) return null;
@@ -88,8 +89,8 @@ export default function BillingPage() {
         }
       );
       redirectToCheckout(result.session_url);
-    } catch {
-      // error handling
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to start checkout");
     }
   };
 
@@ -100,8 +101,8 @@ export default function BillingPage() {
         { return_url: `${window.location.origin}/billing` }
       );
       redirectToPortal(result.portal_url);
-    } catch {
-      // error handling
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to open billing portal");
     }
   };
 

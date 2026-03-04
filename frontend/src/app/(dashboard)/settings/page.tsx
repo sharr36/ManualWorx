@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -63,9 +64,10 @@ function ProfileTab({
     try {
       await api.patch(`/api/users/${user.id}`, { name, skill_level: skillLevel });
       setSuccess(true);
+      toast.success("Profile saved");
       onSave();
-    } catch {
-      // error handling
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to save profile");
     } finally {
       setSaving(false);
     }
@@ -127,9 +129,10 @@ function OrganizationTab({
     try {
       await api.patch("/api/tenants/current", { name });
       setSuccess(true);
+      toast.success("Organization updated");
       onSave();
-    } catch {
-      // error handling
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to update organization");
     } finally {
       setSaving(false);
     }
