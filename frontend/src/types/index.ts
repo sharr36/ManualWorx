@@ -240,6 +240,58 @@ export interface DiagramPageItem {
   confidence: number | null;
 }
 
+// --- Analysis / Inference ---
+
+export interface CoverageAnalysis {
+  manual_id: string;
+  system_area: string;
+  machine_model: string;
+  coverage_score: number;
+  has_service_manual: boolean;
+  has_operator_manual: boolean;
+  has_parts_manual: boolean;
+  has_hydraulic_schematic: boolean;
+  has_electrical_schematic: boolean;
+  has_wiring_diagram: boolean;
+  has_diagnostic_flowchart: boolean;
+  gaps: { type: string; description: string; impact: string }[];
+  strengths: string[];
+  recommendations: string[];
+  page_count: number;
+}
+
+export interface InferredComponent {
+  id: string;
+  component_name: string;
+  component_type: string;
+  designator: string | null;
+  inferred_from: string;
+  confidence: number;
+  specs: Record<string, string>;
+  notes?: string;
+}
+
+export interface GapAnalysis {
+  manual_id: string;
+  title: string;
+  overall_quality: number;
+  gaps: {
+    category: string;
+    description: string;
+    impact: string;
+    affected_systems: string[];
+    recommendation: string;
+  }[];
+  coverage_by_area: {
+    system_area: string;
+    coverage: number;
+    has_specs: boolean;
+    has_procedures: boolean;
+    has_diagrams: boolean;
+    has_troubleshooting: boolean;
+  }[];
+}
+
 // --- Teaching ---
 
 export interface LearningPath {

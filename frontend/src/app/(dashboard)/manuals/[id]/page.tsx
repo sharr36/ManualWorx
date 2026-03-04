@@ -7,8 +7,11 @@ import {
   BookOpen,
   FileText,
   Image as ImageIcon,
+  Loader2,
   RefreshCw,
+  Search,
   Trash2,
+  Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api-client";
 import { formatDate } from "@/lib/utils";
-import type { Manual, Page } from "@/types";
+import type { CoverageAnalysis, GapAnalysis, InferredComponent, Manual, Page } from "@/types";
 
 interface ManualDetail extends Manual {
   pages_processed?: number;
@@ -227,6 +230,7 @@ export default function ManualDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="pages">Pages ({pages.length})</TabsTrigger>
           <TabsTrigger value="schematics">Schematics</TabsTrigger>
+          <TabsTrigger value="analysis">Analysis</TabsTrigger>
           <TabsTrigger value="specs">Specs</TabsTrigger>
         </TabsList>
 
@@ -417,6 +421,10 @@ export default function ManualDetailPage() {
           })()}
         </TabsContent>
 
+        <TabsContent value="analysis" className="mt-6">
+          <AnalysisTab manualId={manualId} manualReady={manual.upload_status === "ready"} />
+        </TabsContent>
+
         <TabsContent value="specs" className="mt-6">
           <ComingSoon
             icon={BookOpen}
@@ -426,6 +434,332 @@ export default function ManualDetailPage() {
           />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+/* ---------- Analysis Tab Component ---------- */
+
+const impactColors: Record<string, string> = {
+  critical: "bg-red-100 text-red-800",
+  high: "bg-orange-100 text-orange-800",
+  medium: "bg-amber-100 text-amber-800",
+  low: "bg-slate-100 text-slate-700",
+};
+
+function AnalysisTab({ manualId, manualReady }: { manualId: string; manualReady: boolean }) {
+  const [coverage, setCoverage] = useState<CoverageAnalysis | null>(null);
+  const [gaps, setGaps] = useState<GapAnalysis | null>(null);
+  const [components, setComponents] = useState<InferredComponent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState<"coverage" | "gaps" | "components">("coverage");
+
+  const runAnalysis = async (type: "coverage" | "gaps" | "components") => {
+    setLoading(true);
+    setActiveSection(type);
+    try {
+      if (type === "coverage") {
+        const result = await api.post<CoverageAnalysis>("/api/analyze/coverage", {
+          manual_id: manualId,
+        });
+        setCoverage(result);
+      } else if (type === "gaps") {
+        const result = await api.post<GapAnalysis>("/api/analyze/gaps", {
+          manual_id: manualId,
+        });
+        setGaps(result);
+      } else {
+        const result = await api.post<{ components: InferredComponent[] }>("/api/analyze/components", {
+          manual_id: manualId,
+        });
+        setComponents(result.components || []);
+      }
+    } catch {
+      // analysis failed
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!manualReady) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        Manual must be fully processed before running analysis.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Analysis action buttons */}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant={activeSection === "coverage" ? "default" : "outline"}
+          size="sm"
+          onClick={() => runAnalysis("coverage")}
+          disabled={loading}
+        >
+          {loading && activeSection === "coverage" ? (
+            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Search className="mr-2 h-3.5 w-3.5" />
+          )}
+          Coverage Analysis
+        </Button>
+        <Button
+          variant={activeSection === "gaps" ? "default" : "outline"}
+          size="sm"
+          onClick={() => runAnalysis("gaps")}
+          disabled={loading}
+        >
+          {loading && activeSection === "gaps" ? (
+            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Zap className="mr-2 h-3.5 w-3.5" />
+          )}
+          Gap Detection
+        </Button>
+        <Button
+          variant={activeSection === "components" ? "default" : "outline"}
+          size="sm"
+          onClick={() => runAnalysis("components")}
+          disabled={loading}
+        >
+          {loading && activeSection === "components" ? (
+            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <FileText className="mr-2 h-3.5 w-3.5" />
+          )}
+          Infer Components
+        </Button>
+      </div>
+
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+          <span className="text-sm text-muted-foreground">Running AI analysis...</span>
+        </div>
+      )}
+
+      {/* Coverage results */}
+      {!loading && coverage && activeSection === "coverage" && (
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold">Documentation Coverage</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-bold">
+                    {Math.round(coverage.coverage_score * 100)}%
+                  </span>
+                </div>
+              </div>
+              <Progress value={coverage.coverage_score * 100} className="mt-3 h-2" />
+              <p className="mt-2 text-xs text-muted-foreground">
+                {coverage.page_count} pages analyzed for {coverage.system_area || "all systems"}
+              </p>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Doc type checklist */}
+            <Card>
+              <CardContent className="p-4">
+                <h4 className="mb-2 text-sm font-semibold">Documentation Types</h4>
+                <div className="space-y-1.5 text-sm">
+                  {[
+                    ["Service Manual", coverage.has_service_manual],
+                    ["Operator Manual", coverage.has_operator_manual],
+                    ["Parts Manual", coverage.has_parts_manual],
+                    ["Hydraulic Schematic", coverage.has_hydraulic_schematic],
+                    ["Electrical Schematic", coverage.has_electrical_schematic],
+                    ["Wiring Diagram", coverage.has_wiring_diagram],
+                    ["Diagnostic Flowchart", coverage.has_diagnostic_flowchart],
+                  ].map(([label, has]) => (
+                    <div key={label as string} className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${has ? "bg-emerald-500" : "bg-slate-300"}`} />
+                      <span className={has ? "" : "text-muted-foreground"}>{label as string}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Gaps */}
+            <Card>
+              <CardContent className="p-4">
+                <h4 className="mb-2 text-sm font-semibold">Identified Gaps ({coverage.gaps.length})</h4>
+                {coverage.gaps.length > 0 ? (
+                  <div className="space-y-2">
+                    {coverage.gaps.map((gap, i) => (
+                      <div key={i} className="text-xs">
+                        <Badge className={`${impactColors[gap.impact] || impactColors.low} mr-1 text-[10px]`}>
+                          {gap.impact}
+                        </Badge>
+                        {gap.description}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No gaps detected.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Recommendations */}
+          {coverage.recommendations && coverage.recommendations.length > 0 && (
+            <Card>
+              <CardContent className="p-4">
+                <h4 className="mb-2 text-sm font-semibold">Recommendations</h4>
+                <ul className="space-y-1 text-xs text-muted-foreground">
+                  {coverage.recommendations.map((rec, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="text-emerald-500">-</span> {rec}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* Gap detection results */}
+      {!loading && gaps && activeSection === "gaps" && (
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold">Documentation Quality</h3>
+                <span className="text-2xl font-bold">
+                  {Math.round(gaps.overall_quality * 100)}%
+                </span>
+              </div>
+              <Progress value={gaps.overall_quality * 100} className="mt-3 h-2" />
+            </CardContent>
+          </Card>
+
+          {/* Gaps list */}
+          {gaps.gaps.length > 0 && (
+            <Card>
+              <CardContent className="p-4">
+                <h4 className="mb-3 text-sm font-semibold">
+                  Gaps Found ({gaps.gaps.length})
+                </h4>
+                <div className="space-y-3">
+                  {gaps.gaps.map((gap, i) => (
+                    <div key={i} className="rounded-lg border p-3">
+                      <div className="flex items-center gap-2">
+                        <Badge className={`${impactColors[gap.impact] || impactColors.low} text-[10px]`}>
+                          {gap.impact}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px] capitalize">
+                          {gap.category}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-sm">{gap.description}</p>
+                      {gap.recommendation && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Fix: {gap.recommendation}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Coverage by area */}
+          {gaps.coverage_by_area && gaps.coverage_by_area.length > 0 && (
+            <Card>
+              <CardContent className="p-4">
+                <h4 className="mb-3 text-sm font-semibold">Coverage by System Area</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b text-muted-foreground">
+                        <th className="pb-2 text-left">System</th>
+                        <th className="pb-2 text-center">Specs</th>
+                        <th className="pb-2 text-center">Procedures</th>
+                        <th className="pb-2 text-center">Diagrams</th>
+                        <th className="pb-2 text-center">Troubleshooting</th>
+                        <th className="pb-2 text-right">Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gaps.coverage_by_area.map((area, i) => (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="py-2 font-medium">{area.system_area}</td>
+                          <td className="py-2 text-center">{area.has_specs ? "✓" : "—"}</td>
+                          <td className="py-2 text-center">{area.has_procedures ? "✓" : "—"}</td>
+                          <td className="py-2 text-center">{area.has_diagrams ? "✓" : "—"}</td>
+                          <td className="py-2 text-center">{area.has_troubleshooting ? "✓" : "—"}</td>
+                          <td className="py-2 text-right">{Math.round(area.coverage * 100)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* Component inference results */}
+      {!loading && components.length > 0 && activeSection === "components" && (
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="mb-3 font-semibold">
+              Inferred Components ({components.length})
+            </h3>
+            <div className="space-y-2">
+              {components.map((comp) => (
+                <div key={comp.id} className="flex items-start gap-3 rounded-lg border p-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-slate-100 text-xs font-bold uppercase">
+                    {comp.component_type.slice(0, 2)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{comp.component_name}</span>
+                      {comp.designator && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          {comp.designator}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant="outline" className="text-[10px] capitalize">
+                        {comp.component_type}
+                      </Badge>
+                      <span>via {comp.inferred_from.replace("_", " ")}</span>
+                      <span>{Math.round(comp.confidence * 100)}% confidence</span>
+                    </div>
+                    {Object.keys(comp.specs || {}).length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {Object.entries(comp.specs).map(([k, v]) => (
+                          <span key={k} className="text-[10px] text-muted-foreground">
+                            {k}: {v}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Empty state for components */}
+      {!loading && components.length === 0 && activeSection === "components" && !coverage && !gaps && (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          Click "Infer Components" to extract components from this manual.
+        </p>
+      )}
     </div>
   );
 }

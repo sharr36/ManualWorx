@@ -123,6 +123,84 @@ Format as:
 ## References
 [Page citations]""",
     },
+    "system_analysis": {
+        "title": "System Analysis Report",
+        "prompt": """Create a comprehensive system analysis report from this query and response.
+
+QUERY: {query_text}
+RESPONSE: {response_text}
+SOURCES: {sources}
+
+Format as:
+# System Analysis Report
+
+## System Overview
+[Description of the system being analyzed]
+
+## Component Inventory
+| Component | Type | Designator | Confidence |
+[All components identified in this system]
+
+## Documentation Coverage
+[What documentation exists vs. what is missing]
+
+## Specification Summary
+[Key specifications found with source pages]
+
+## Cross-References
+[Related systems and component interactions]
+
+## Identified Gaps
+[Missing information that could impact service quality]
+
+## Recommendations
+[Suggested actions to improve documentation coverage]
+
+## Confidence Assessment
+[Overall confidence in the analysis with per-area breakdown]
+
+## References
+[Page citations from source manuals]""",
+    },
+    "gap_report": {
+        "title": "Documentation Gap Report",
+        "prompt": """Create a documentation gap analysis report from this query and response.
+
+QUERY: {query_text}
+RESPONSE: {response_text}
+SOURCES: {sources}
+
+Format as:
+# Documentation Gap Report
+
+## Executive Summary
+[Brief overview of documentation completeness]
+
+## Coverage Score
+[Overall coverage percentage and rating]
+
+## Critical Gaps
+[High-impact missing documentation — safety, spec, and procedure gaps]
+
+## Moderate Gaps
+[Medium-impact missing documentation]
+
+## Minor Gaps
+[Low-impact missing items or improvements]
+
+## Coverage by System Area
+| System Area | Specs | Procedures | Diagrams | Troubleshooting | Score |
+[Coverage matrix for each system area]
+
+## Impact Assessment
+[How gaps affect mechanic ability to service equipment]
+
+## Remediation Plan
+[Prioritized steps to fill documentation gaps]
+
+## References
+[Page citations from analyzed manuals]""",
+    },
 }
 
 # Fallback template for types without a specific template
