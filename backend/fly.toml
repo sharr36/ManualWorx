@@ -2,7 +2,7 @@ app = "manualworx-api"
 primary_region = "ord"
 
 [build]
-  dockerfile = "./Dockerfile"
+  dockerfile = "backend/Dockerfile"
 
 [http_service]
   internal_port = 8000
