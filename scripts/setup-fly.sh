@@ -31,6 +31,9 @@ flyctl apps create manualworx-worker --org personal 2>/dev/null || echo "manualw
 # DocGen
 flyctl apps create manualworx-docgen --org personal 2>/dev/null || echo "manualworx-docgen already exists"
 
+# Qdrant (vector database)
+flyctl apps create manualworx-qdrant --org personal 2>/dev/null || echo "manualworx-qdrant already exists"
+
 echo ""
 echo "--- Provisioning Postgres ---"
 flyctl postgres create \
@@ -53,6 +56,14 @@ flyctl redis create \
     2>/dev/null || echo "manualworx-redis already exists"
 
 echo ""
+echo "--- Creating Qdrant volume ---"
+flyctl volumes create qdrant_data \
+    --region ord \
+    --size 1 \
+    --app manualworx-qdrant \
+    2>/dev/null || echo "qdrant_data volume already exists"
+
+echo ""
 echo "--- Creating Tigris storage bucket ---"
 flyctl storage create \
     --name manualworx-storage \
@@ -68,6 +79,7 @@ echo "    ANTHROPIC_API_KEY=sk-ant-... \\"
 echo "    STRIPE_SECRET_KEY=sk_... \\"
 echo "    STRIPE_WEBHOOK_SECRET=whsec_... \\"
 echo "    SECRET_KEY=\$(openssl rand -base64 32) \\"
+echo "    QDRANT_URL=http://manualworx-qdrant.internal:6333 \\"
 echo "    CORS_ORIGINS=https://manualworx-web.fly.dev"
 echo ""
 echo "  flyctl secrets set -a manualworx-web \\"
@@ -76,7 +88,8 @@ echo "    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_..."
 echo ""
 echo "  flyctl secrets set -a manualworx-worker \\"
 echo "    DATABASE_URL=\$DATABASE_URL \\"
-echo "    REDIS_URL=\$REDIS_URL"
+echo "    REDIS_URL=\$REDIS_URL \\"
+echo "    QDRANT_URL=http://manualworx-qdrant.internal:6333"
 echo ""
 echo "=== Setup complete! ==="
 echo "Next: run ./scripts/run-migrations.sh then deploy with make deploy"

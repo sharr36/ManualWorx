@@ -61,8 +61,11 @@
 - All deploy jobs now `needs: [checks]` — deploy blocked on lint/type errors
 - Uses Node.js 22, runs `next lint` and `tsc --noEmit`
 
-**Fly.io Production Config**
+**Fly.io Production Config + Self-Hosted Qdrant**
 - Changed backend `min_machines_running` from 0 to 1 (eliminates cold starts)
+- Added `qdrant/fly.toml` for self-hosted Qdrant on Fly.io (persistent volume, health checks, always-on)
+- Updated `scripts/setup-fly.sh` to create Qdrant app, volume, and set QDRANT_URL on API/worker
+- Added Qdrant deploy job to CI pipeline
 
 **Admin Analytics**
 - Created `backend/app/routers/admin.py` with `GET /api/admin/stats` endpoint (owner-only)

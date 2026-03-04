@@ -126,7 +126,7 @@ make deploy
 - **Vector Store**: Qdrant (self-hosted on Fly)
 - **Storage**: Tigris (Fly-native S3)
 - **Billing**: Stripe (subscriptions + one-time processing fees)
-- **Hosting**: Fly.io (4 services: API, Web, Worker, DocGen)
+- **Hosting**: Fly.io (5 services: API, Web, Worker, DocGen, Qdrant)
 
 ---
 
