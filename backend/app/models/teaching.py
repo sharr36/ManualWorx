@@ -1,5 +1,7 @@
 """Teaching mode and learning models."""
 
+from uuid import UUID
+
 from pydantic import BaseModel
 
 from manualworx_shared.constants import SkillLevel, TeachDepth
@@ -17,6 +19,11 @@ class AssistRequest(BaseModel):
     manual_ids: list[str] | None = None
 
 
+class AssistChoiceRequest(BaseModel):
+    choice: str  # "teach_first", "quick_overview", "skip_to_fix"
+    mechanic_id: str | None = None
+
+
 class QuizGenerateRequest(BaseModel):
     learning_path_id: str
     module_index: int
@@ -27,6 +34,17 @@ class QuizSubmitRequest(BaseModel):
     learning_path_id: str
     module_index: int
     answers: dict[str, str]
+    mechanic_id: str | None = None
+
+
+class GeneratePathRequest(BaseModel):
+    manual_id: str
+
+
+class CreateMechanicRequest(BaseModel):
+    name: str
+    user_id: str | None = None
+    skill_level: SkillLevel = SkillLevel.GREEN
 
 
 class LearningPathResponse(BaseModel):

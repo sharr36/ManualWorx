@@ -105,6 +105,7 @@ class QuestionType(StrEnum):
 
 class TeachDepth(StrEnum):
     FULL = "full"
+    STANDARD = "standard"
     QUICK = "quick"
     SKIPPED = "skipped"
 

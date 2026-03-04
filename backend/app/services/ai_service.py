@@ -593,8 +593,185 @@ Important:
             return "DIAGRAM ANNOTATIONS:\n" + "\n".join(diagram_sections)
         return "No diagram annotations available for these pages."
 
-    async def generate_lesson(self, system_area, context_pages, depth="standard"):
-        raise NotImplementedError("Phase 8")
+    async def generate_lesson(self, system_area: str, context_pages: list[dict], depth: str = "standard") -> dict:
+        """Generate an interactive lesson about a system area.
+
+        Args:
+            system_area: The system to teach about (e.g., "auxiliary hydraulics").
+            context_pages: Retrieved manual pages as context chunks.
+            depth: "full" (5-min deep dive), "quick" (60-sec overview), or "standard" (2-3 min).
+
+        Returns:
+            dict with lesson_text, key_concepts, diagrams_referenced, quiz_hooks.
+        """
+        context = self._build_context(context_pages)
+
+        depth_instructions = {
+            "full": "Create a thorough 5-minute lesson. Cover theory, component functions, fluid/signal flow paths, common failure modes, and maintenance tips. Use numbered sections.",
+            "quick": "Create a concise 60-second overview. Hit only the critical points: what the system does, main components, and one key maintenance fact.",
+            "standard": "Create a 2-3 minute lesson. Cover how the system works, key components and their roles, and important specifications.",
+        }
+
+        prompt = f"""You are ManualWorx AI teaching a mechanic about the {system_area} system.
+
+CONTEXT PAGES:
+{context}
+
+TEACHING DEPTH: {depth}
+{depth_instructions.get(depth, depth_instructions["standard"])}
+
+Generate an engaging lesson that:
+1. Starts with a practical hook ("Here's why this matters...")
+2. Explains how the system works using the manual content
+3. References specific pages and specs from the context
+4. Highlights safety warnings with ⚠️
+5. Ends with 2-3 key takeaways
+
+Also provide:
+- A JSON block at the end with this structure:
+```json
+{{
+  "key_concepts": ["concept1", "concept2", ...],
+  "diagrams_referenced": [page_numbers_that_have_diagrams],
+  "quiz_hooks": ["potential quiz question 1", "potential quiz question 2", ...]
+}}
+```"""
+
+        start = time.monotonic()
+        response = await self.client.messages.create(
+            model=settings.DEFAULT_MODEL,
+            max_tokens=2000 if depth == "full" else 1000,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        lesson_text = response.content[0].text
+        latency = int((time.monotonic() - start) * 1000)
+
+        # Try to extract the JSON metadata
+        metadata = {"key_concepts": [], "diagrams_referenced": [], "quiz_hooks": []}
+        try:
+            json_start = lesson_text.rfind("```json")
+            if json_start != -1:
+                json_end = lesson_text.find("```", json_start + 7)
+                json_str = lesson_text[json_start + 7:json_end].strip()
+                metadata = json.loads(json_str)
+                lesson_text = lesson_text[:json_start].strip()
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        return {
+            "lesson_text": lesson_text,
+            "key_concepts": metadata.get("key_concepts", []),
+            "diagrams_referenced": metadata.get("diagrams_referenced", []),
+            "quiz_hooks": metadata.get("quiz_hooks", []),
+            "depth": depth,
+            "system_area": system_area,
+            "model_used": settings.DEFAULT_MODEL,
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+            "latency_ms": latency,
+        }
+
+    async def generate_quiz_questions(
+        self, system_area: str, context_pages: list[dict], count: int = 5, difficulty: str = "green"
+    ) -> list[dict]:
+        """Generate quiz questions from manual content.
+
+        Returns:
+            List of question dicts with question_text, question_type, options, correct_answer, explanation.
+        """
+        context = self._build_context(context_pages)
+
+        prompt = f"""Generate exactly {count} quiz questions about the {system_area} system for a mechanic at the "{difficulty}" skill level.
+
+CONTEXT PAGES:
+{context}
+
+DIFFICULTY LEVELS:
+- green: Basic identification, safety awareness, simple procedures
+- apprentice: System theory, component interactions, spec interpretation
+- journeyman: Advanced diagnostics, edge cases, cross-system effects
+
+QUESTION TYPES to use (mix them):
+- concept: Understanding how something works
+- diagram_id: Identifying components in diagrams/schematics
+- scenario: "What would happen if..." practical situations
+- sequence: Correct order of procedure steps
+- safety: Safety-critical knowledge
+
+Return a JSON array:
+```json
+[
+  {{
+    "question_type": "concept|diagram_id|scenario|sequence|safety",
+    "question_text": "The question",
+    "options": {{"A": "option A", "B": "option B", "C": "option C", "D": "option D"}},
+    "correct_answer": "A",
+    "explanation": "Why this is correct, citing the manual page"
+  }}
+]
+```
+
+Return ONLY the JSON array, no other text."""
+
+        response = await self.client.messages.create(
+            model=settings.DEFAULT_MODEL,
+            max_tokens=2000,
+            system="You generate technical quiz questions from service manual content. Return only valid JSON.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        text = response.content[0].text.strip()
+        # Strip markdown fences if present
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3].strip()
+
+        try:
+            questions = json.loads(text)
+            return questions if isinstance(questions, list) else []
+        except json.JSONDecodeError:
+            return []
+
+    async def identify_system_area(self, problem_description: str) -> dict:
+        """Use AI to identify which system area a problem relates to.
+
+        Returns:
+            dict with system_area, confidence, related_systems.
+        """
+        prompt = f"""A mechanic describes this problem:
+"{problem_description}"
+
+Identify the primary system area this relates to. Common areas:
+engine, hydraulic, electrical, transmission, drivetrain, steering, brakes, cooling, fuel, exhaust, HVAC, attachment, frame, cab
+
+Return JSON only:
+```json
+{{
+  "system_area": "the primary system",
+  "confidence": 0.0-1.0,
+  "related_systems": ["other", "related", "systems"]
+}}
+```"""
+
+        response = await self.client.messages.create(
+            model=settings.RERANK_MODEL,  # Use Haiku for fast classification
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3].strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"system_area": "unknown", "confidence": 0.0, "related_systems": []}
 
     def _build_context(self, chunks: list[dict]) -> str:
         """Build a formatted context string from retrieved chunks."""
