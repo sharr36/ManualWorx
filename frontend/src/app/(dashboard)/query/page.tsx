@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MessageSquare, Send } from "lucide-react";
+import { Clock, MessageSquare, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatMessage } from "@/components/query/chat-message";
 import { SourceCitation } from "@/components/query/source-citation";
 import { api } from "@/lib/api-client";
-import type { Manual, QueryMode, ConfidenceLevel } from "@/types";
+import type { Manual, ConfidenceLevel } from "@/types";
 
 interface Message {
   id: string;
@@ -29,15 +29,13 @@ interface Source {
   manual_title?: string;
 }
 
-interface QueryApiResponse {
+interface HistoryItem {
   id: string;
-  session_id?: string;
-  response_text: string;
-  confidence_score?: number;
-  confidence_level?: string;
-  sources?: Source[];
-  model_used?: string;
+  query_text: string;
+  query_mode: string;
+  response_preview: string;
   latency_ms?: number;
+  created_at?: string;
 }
 
 const EXAMPLE_QUERIES = [
@@ -60,6 +58,8 @@ export default function QueryPage() {
   const [selectedManual, setSelectedManual] = useState<string>("");
   const [mode, setMode] = useState("qa");
   const [lastSources, setLastSources] = useState<Source[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -71,11 +71,45 @@ export default function QueryPage() {
         setManuals(ready);
       })
       .catch(() => {});
+
+    // Load query history
+    api
+      .get<HistoryItem[]>("/api/query/history?limit=30")
+      .then(setHistory)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const loadHistoryQuery = useCallback(
+    async (queryId: string) => {
+      try {
+        const result = await api.get<{
+          query_text: string;
+          response_text: string;
+          sources?: Source[];
+        }>(`/api/query/${queryId}`);
+        setMessages([
+          {
+            id: `user-${queryId}`,
+            role: "user",
+            content: result.query_text,
+          },
+          {
+            id: queryId,
+            role: "assistant",
+            content: result.response_text,
+            sources: result.sources,
+          },
+        ]);
+        setLastSources(result.sources || []);
+        setShowHistory(false);
+      } catch {}
+    },
+    []
+  );
 
   const submitQuery = useCallback(
     async (queryText: string) => {
@@ -90,36 +124,73 @@ export default function QueryPage() {
       setInput("");
       setLoading(true);
 
+      const assistantId = `assistant-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantId, role: "assistant", content: "" },
+      ]);
+
       try {
         const manual_ids = selectedManual ? [selectedManual] : undefined;
-        const result = await api.post<QueryApiResponse>("/api/query", {
-          query_text: queryText.trim(),
-          query_mode: mode,
-          manual_ids,
-        });
-
-        const assistantMsg: Message = {
-          id: result.id,
-          role: "assistant",
-          content: result.response_text,
-          confidence: result.confidence_score
-            ? Math.round(result.confidence_score * 100)
-            : undefined,
-          confidenceLevel: result.confidence_level as ConfidenceLevel | undefined,
-          sources: result.sources,
-          latency_ms: result.latency_ms,
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-        setLastSources(result.sources || []);
-      } catch (err: any) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `error-${Date.now()}`,
-            role: "assistant",
-            content: `Error: ${err.detail || "Failed to get response"}`,
+        await api.stream(
+          "/api/query/stream",
+          { query_text: queryText.trim(), query_mode: mode, manual_ids },
+          (text) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, content: m.content + text }
+                  : m
+              )
+            );
           },
-        ]);
+          (data) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? {
+                      ...m,
+                      confidence: data.confidence_score
+                        ? Math.round((data.confidence_score as number) * 100)
+                        : undefined,
+                      confidenceLevel: data.confidence_level as
+                        | ConfidenceLevel
+                        | undefined,
+                      sources: data.sources as Source[] | undefined,
+                      latency_ms: data.latency_ms as number | undefined,
+                    }
+                  : m
+              )
+            );
+            setLastSources((data.sources as Source[]) || []);
+            // Refresh history after successful query
+            api
+              .get<HistoryItem[]>("/api/query/history?limit=30")
+              .then(setHistory)
+              .catch(() => {});
+          },
+          (error) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, content: `Error: ${error}` }
+                  : m
+              )
+            );
+          }
+        );
+      } catch (err: unknown) {
+        const detail =
+          err && typeof err === "object" && "detail" in err
+            ? (err as { detail: string }).detail
+            : "Failed to get response";
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: `Error: ${detail}` }
+              : m
+          )
+        );
       } finally {
         setLoading(false);
         textareaRef.current?.focus();
@@ -140,6 +211,48 @@ export default function QueryPage() {
 
   return (
     <div className="flex h-[calc(100vh-8rem)] gap-4">
+      {/* History sidebar */}
+      {showHistory && (
+        <div className="w-64 shrink-0 overflow-y-auto border-r pr-3">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">History</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs"
+              onClick={() => setShowHistory(false)}
+            >
+              Close
+            </Button>
+          </div>
+          {history.length > 0 ? (
+            <div className="space-y-1">
+              {history.map((item) => (
+                <button
+                  key={item.id}
+                  className="w-full rounded-md px-2 py-2 text-left transition hover:bg-slate-50"
+                  onClick={() => loadHistoryQuery(item.id)}
+                >
+                  <p className="line-clamp-1 text-xs font-medium">
+                    {item.query_text}
+                  </p>
+                  <p className="line-clamp-1 text-[10px] text-muted-foreground">
+                    {item.response_preview}
+                  </p>
+                  {item.created_at && (
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {new Date(item.created_at).toLocaleDateString()}
+                    </p>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No previous queries.</p>
+          )}
+        </div>
+      )}
+
       {/* Chat area */}
       <div className="flex flex-1 flex-col">
         {/* Messages */}
@@ -175,13 +288,14 @@ export default function QueryPage() {
               content={msg.content}
               confidence={msg.confidence}
               confidenceLevel={msg.confidenceLevel}
+              latency_ms={msg.latency_ms}
               sources={msg.sources?.map(
                 (s) => `p.${s.page_number + 1} (${s.classification})`
               )}
             />
           ))}
 
-          {loading && (
+          {loading && messages[messages.length - 1]?.content === "" && (
             <div className="flex justify-start">
               <div className="max-w-[80%] space-y-2 rounded-2xl rounded-bl-md border bg-white px-4 py-3">
                 <Skeleton className="h-4 w-64" />
@@ -198,6 +312,15 @@ export default function QueryPage() {
         <div className="border-t p-4">
           <div className="flex gap-2">
             <div className="hidden gap-1 sm:flex">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs"
+                onClick={() => setShowHistory(!showHistory)}
+                title="Query history"
+              >
+                <Clock className="h-3.5 w-3.5" />
+              </Button>
               {Object.entries(MODE_MAP).map(([label, value]) => (
                 <Button
                   key={label}
@@ -275,6 +398,8 @@ export default function QueryPage() {
                     pageNumber={source.page_number + 1}
                     classification={source.classification}
                     textPreview={source.text_preview}
+                    relevanceScore={source.relevance_score}
+                    manualTitle={source.manual_title}
                   />
                 ))}
               </div>

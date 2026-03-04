@@ -1,6 +1,8 @@
 """AI reasoning service — Anthropic Claude integration."""
 
+import json
 import time
+from collections.abc import AsyncGenerator
 
 import anthropic
 
@@ -162,6 +164,111 @@ class AIService:
             "model_used": settings.DEFAULT_MODEL,
             "latency_ms": latency_ms,
         }
+
+    async def generate_response_stream(
+        self,
+        query_text: str,
+        query_mode: str,
+        context_chunks: list[dict],
+        skill_level: str | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream a response token-by-token as SSE events.
+
+        Yields SSE-formatted strings:
+          data: {"type": "token", "text": "..."}\n\n
+          data: {"type": "done", "confidence_score": ..., "sources": [...]}\n\n
+        """
+        context = self._build_context(context_chunks)
+
+        if query_mode == "troubleshoot":
+            user_prompt = TROUBLESHOOT_PROMPT.format(query=query_text, context=context)
+        else:
+            user_prompt = QA_PROMPT.format(query=query_text, context=context)
+
+        system = SYSTEM_PROMPT
+        if skill_level == "green":
+            system += "\n\nThe mechanic is a beginner. Use simple language, explain technical terms, and provide extra detail on safety."
+        elif skill_level == "apprentice":
+            system += "\n\nThe mechanic is an apprentice. Use standard technical language but explain complex concepts."
+
+        start = time.monotonic()
+        full_text = ""
+        input_tokens = 0
+        output_tokens = 0
+
+        async with self.client.messages.stream(
+            model=settings.DEFAULT_MODEL,
+            max_tokens=2048,
+            system=system,
+            messages=[{"role": "user", "content": user_prompt}],
+        ) as stream:
+            async for event in stream:
+                if event.type == "content_block_delta":
+                    text = event.delta.text
+                    full_text += text
+                    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+
+            # Get final message for usage stats
+            message = await stream.get_final_message()
+            input_tokens = message.usage.input_tokens
+            output_tokens = message.usage.output_tokens
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+        confidence_score = self._calculate_confidence(context_chunks)
+        confidence_level = self._get_confidence_level(confidence_score)
+        sources = self._build_sources(context_chunks)
+
+        # Yield final event with metadata
+        yield f"data: {json.dumps({'type': 'done', 'response_text': full_text, 'confidence_score': confidence_score, 'confidence_level': confidence_level, 'sources': sources, 'input_tokens': input_tokens, 'output_tokens': output_tokens, 'model_used': settings.DEFAULT_MODEL, 'latency_ms': latency_ms})}\n\n"
+
+    async def rerank_passages(
+        self,
+        query: str,
+        passages: list[dict],
+    ) -> list[dict]:
+        """Re-rank passages using Claude for relevance scoring.
+
+        Returns passages with updated 'score' field.
+        """
+        if not passages:
+            return []
+
+        rerank_model = getattr(settings, "RERANK_MODEL", "claude-haiku-4-5-20251001")
+
+        passage_text = ""
+        for i, p in enumerate(passages):
+            text = p.get("chunk_text", "")[:500]
+            passage_text += f"\n[{i}] Page {p.get('page_number', '?')}: {text}\n"
+
+        prompt = f"""Rate the relevance of each passage to the query on a scale of 0.0 to 1.0.
+Return ONLY a JSON array of numbers, one per passage, in order.
+
+Query: {query}
+
+Passages:{passage_text}
+
+Return format: [0.8, 0.3, 0.95, ...]"""
+
+        try:
+            response = await self.client.messages.create(
+                model=rerank_model,
+                max_tokens=256,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            # Extract JSON array from response
+            start_idx = text.find("[")
+            end_idx = text.rfind("]") + 1
+            if start_idx >= 0 and end_idx > start_idx:
+                scores = json.loads(text[start_idx:end_idx])
+                for i, score in enumerate(scores):
+                    if i < len(passages):
+                        passages[i]["score"] = float(score)
+        except Exception:
+            pass  # Keep original scores on failure
+
+        passages.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return passages
 
     async def analyze_diagram(self, image_bytes, diagram_type=None):
         raise NotImplementedError("Phase 5")

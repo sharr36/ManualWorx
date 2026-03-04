@@ -3,6 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from ..models.query import (
     FollowupRequest,
@@ -35,6 +36,33 @@ async def create_query(body: QueryRequest, request: Request) -> QueryResponse:
     )
 
     return QueryResponse(**result)
+
+
+@router.post("/stream")
+async def create_query_stream(body: QueryRequest, request: Request):
+    """Submit a query and stream the response as SSE events."""
+    pool = request.app.state.db_pool
+    redis = getattr(request.app.state, "redis", None)
+    tenant_id = request.state.tenant_id
+    skill_level = getattr(request.state, "user_skill_level", None)
+
+    return StreamingResponse(
+        _service.create_query_stream(
+            pool=pool,
+            redis=redis,
+            tenant_id=tenant_id,
+            query_text=body.query_text,
+            query_mode=body.query_mode,
+            manual_ids=body.manual_ids,
+            skill_level=skill_level,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/{query_id}/followup")

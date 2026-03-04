@@ -1,31 +1,171 @@
-"""Page classification — identifies content type of manual pages."""
+"""Page classification — identifies content type of manual pages using Claude vision."""
+
+import asyncio
+import base64
+import json
+
+import anthropic
+
+from manualworx_shared.constants import PageClassification
+
+
+CLASSIFICATION_PROMPT = """Classify this service manual page into exactly ONE of these categories:
+
+- text: Primarily text content (procedures, descriptions, specifications written in paragraphs)
+- hydraulic_schematic: Hydraulic system diagram with flow lines, valves, pumps, cylinders
+- electrical_diagram: Electrical wiring diagram, circuit schematic
+- parts_exploded_view: Exploded parts diagram showing component assembly/disassembly
+- torque_spec_table: Table of torque specifications, clearances, or measurement values
+- diagnostic_flowchart: Troubleshooting flowchart or decision tree
+- wiring_harness: Wiring harness routing diagram or connector pinout
+- general_illustration: Photo, illustration, or diagram that doesn't fit other categories
+
+Consider both the image and the extracted text when classifying.
+
+EXTRACTED TEXT FROM THIS PAGE:
+{page_text}
+
+Respond with ONLY the classification label (e.g. "hydraulic_schematic"). No explanation."""
+
+VALID_CLASSIFICATIONS = {c.value for c in PageClassification}
 
 
 class PageClassifier:
-    """Classifies pages as text, schematic, table, etc.
+    """Classifies pages using Claude vision for accurate content type detection.
 
-    Uses a combination of heuristic rules (text density, image ratio)
-    and optionally a CNN model for more accurate classification.
+    Falls back to heuristic classification if vision fails.
     """
 
-    async def classify(self, page_data: dict) -> str:
-        """Classify a single page.
+    def __init__(self, api_key: str, model: str = "claude-haiku-4-5-20251001"):
+        self.client = anthropic.AsyncAnthropic(api_key=api_key)
+        self.model = model
+
+    async def classify(self, page_image_bytes: bytes, page_text: str = "") -> str:
+        """Classify a single page using Claude vision.
 
         Args:
-            page_data: {text, has_images, image_ratio, text_density}
+            page_image_bytes: PNG image bytes of the page.
+            page_text: Extracted text from OCR (provides additional context).
 
         Returns:
             Classification string from PageClassification enum.
         """
-        # TODO: Implement in Phase 2
-        # Heuristic fallback:
-        # - High text density, no images → 'text'
-        # - High image ratio, low text → 'hydraulic_schematic' or 'electrical_diagram'
-        # - Table structure detected → 'torque_spec_table'
-        # - Mixed → 'general_illustration'
-        raise NotImplementedError
+        try:
+            image_b64 = base64.b64encode(page_image_bytes).decode("utf-8")
+            prompt = CLASSIFICATION_PROMPT.format(
+                page_text=page_text[:1000] if page_text else "(no text extracted)"
+            )
 
-    async def classify_batch(self, pages: list[dict]) -> list[str]:
-        """Classify multiple pages."""
-        # TODO: Implement in Phase 2
-        raise NotImplementedError
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=50,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": image_b64,
+                                },
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
+            )
+
+            result = response.content[0].text.strip().lower()
+
+            # Validate against known classifications
+            if result in VALID_CLASSIFICATIONS:
+                return result
+
+            # Try fuzzy matching
+            for valid in VALID_CLASSIFICATIONS:
+                if valid in result:
+                    return valid
+
+            return self._heuristic_classify(page_text)
+
+        except Exception:
+            return self._heuristic_classify(page_text)
+
+    async def classify_batch(
+        self,
+        pages: list[dict],
+        max_concurrent: int = 4,
+    ) -> list[str]:
+        """Classify multiple pages concurrently with a semaphore.
+
+        Args:
+            pages: List of dicts with 'image_bytes' and 'text' keys.
+            max_concurrent: Max parallel Claude calls.
+
+        Returns:
+            List of classification strings in the same order.
+        """
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _classify_one(page: dict) -> str:
+            async with semaphore:
+                return await self.classify(
+                    page_image_bytes=page["image_bytes"],
+                    page_text=page.get("text", ""),
+                )
+
+        results = await asyncio.gather(
+            *[_classify_one(p) for p in pages],
+            return_exceptions=True,
+        )
+
+        return [
+            r if isinstance(r, str) else PageClassification.TEXT
+            for r in results
+        ]
+
+    def _heuristic_classify(self, text: str) -> str:
+        """Fallback heuristic classification based on text content."""
+        if not text or len(text.strip()) < 20:
+            return PageClassification.GENERAL_ILLUSTRATION
+
+        text_lower = text.lower()
+        lines = text.strip().split("\n")
+
+        # Check for table patterns (multiple columns of numbers)
+        table_lines = sum(
+            1 for line in lines
+            if line.count("\t") >= 2 or line.count("  ") >= 3
+        )
+        if table_lines > len(lines) * 0.4:
+            if any(w in text_lower for w in ("torque", "n·m", "ft-lb", "nm", "lb-ft")):
+                return PageClassification.TORQUE_SPEC_TABLE
+
+        # Check for flowchart indicators
+        if any(w in text_lower for w in ("yes", "no", "check", "verify", "does")) and \
+                text_lower.count("?") >= 2:
+            return PageClassification.DIAGNOSTIC_FLOWCHART
+
+        # Check for hydraulic terms
+        hydraulic_terms = ("hydraulic", "valve", "pump", "cylinder", "psi", "bar", "flow")
+        if sum(1 for t in hydraulic_terms if t in text_lower) >= 3:
+            if len(text) < 500:
+                return PageClassification.HYDRAULIC_SCHEMATIC
+
+        # Check for electrical terms
+        electrical_terms = ("wire", "connector", "pin", "circuit", "voltage", "amp", "fuse")
+        if sum(1 for t in electrical_terms if t in text_lower) >= 3:
+            if len(text) < 500:
+                return PageClassification.ELECTRICAL_DIAGRAM
+
+        # Check for parts list
+        if any(w in text_lower for w in ("part number", "part no", "qty", "exploded")):
+            return PageClassification.PARTS_EXPLODED_VIEW
+
+        # Check for wiring harness
+        if any(w in text_lower for w in ("harness", "pinout", "routing")):
+            return PageClassification.WIRING_HARNESS
+
+        return PageClassification.TEXT

@@ -93,6 +93,62 @@ class ApiClient {
 
     return res.json();
   }
+  async stream(
+    path: string,
+    body: unknown,
+    onToken: (text: string) => void,
+    onDone: (data: Record<string, unknown>) => void,
+    onError?: (error: string) => void
+  ): Promise<void> {
+    const url = `${this.baseUrl}${path}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errBody = await res
+        .json()
+        .catch(() => ({ detail: "Stream failed" }));
+      onError?.(errBody.detail || "Stream failed");
+      return;
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) {
+      onError?.("No response stream");
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === "token") {
+            onToken(data.text);
+          } else if (data.type === "done") {
+            onDone(data);
+          }
+        } catch {
+          // skip malformed events
+        }
+      }
+    }
+  }
 }
 
 export const api = new ApiClient(API_BASE);

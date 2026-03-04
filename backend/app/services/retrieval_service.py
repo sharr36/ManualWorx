@@ -1,13 +1,24 @@
 """Vector retrieval service — embeds queries and searches Qdrant."""
 
+import re
 from uuid import UUID
 
 import asyncpg
 
+from ..config import settings
 from ..database import set_tenant_context
 from ..providers import get_embedding_provider, get_vector_provider
+from .ai_service import AIService
 
 COLLECTION_NAME = "manualworx_chunks"
+
+# Patterns that indicate specific technical values worth boosting
+KEYWORD_PATTERNS = [
+    re.compile(r"\b\d+\s*(?:nm|n·m|ft[·-]?lb|lb[·-]?ft|psi|bar|kpa|mpa)\b", re.IGNORECASE),
+    re.compile(r"\b[A-Z]{1,4}[-]?\d{3,}\b"),  # Part numbers like RE505670, 4T-6789
+    re.compile(r"\b\d+(?:\.\d+)?\s*(?:mm|cm|in|inch|inches|thou)\b", re.IGNORECASE),
+    re.compile(r"\b\d+(?:\.\d+)?\s*(?:°[CF]|deg)\b", re.IGNORECASE),
+]
 
 
 class RetrievalService:
@@ -97,6 +108,65 @@ class RetrievalService:
 
         enriched.sort(key=lambda x: x["score"], reverse=True)
         return enriched
+
+    async def retrieve_with_rerank(
+        self,
+        pool: asyncpg.Pool,
+        tenant_id: UUID,
+        query_text: str,
+        manual_ids: list[str] | None = None,
+        top_k: int = 10,
+    ) -> list[dict]:
+        """Hybrid retrieval: semantic search + keyword boost + Claude re-ranking.
+
+        1. Over-fetch from Qdrant (RERANK_TOP_K results)
+        2. Boost scores for chunks containing exact keyword matches
+        3. Re-rank top candidates using Claude
+        4. Deduplicate by page, return top_k
+        """
+        # Step 1: Get initial results (over-fetch for re-ranking)
+        fetch_k = settings.RERANK_TOP_K if settings.RERANK_ENABLED else top_k
+        chunks = await self.retrieve_chunks(
+            pool, tenant_id, query_text, manual_ids, top_k=fetch_k
+        )
+
+        if not chunks:
+            return []
+
+        # Step 2: Keyword boost
+        keywords = self._extract_keywords(query_text)
+        if keywords:
+            for chunk in chunks:
+                text_lower = chunk.get("chunk_text", "").lower()
+                boost = sum(
+                    0.05 for kw in keywords if kw.lower() in text_lower
+                )
+                chunk["score"] = min(chunk.get("score", 0) + boost, 1.0)
+            chunks.sort(key=lambda x: x["score"], reverse=True)
+
+        if not settings.RERANK_ENABLED:
+            return chunks[:top_k]
+
+        # Step 3: Re-rank using Claude
+        ai = AIService()
+        reranked = await ai.rerank_passages(query_text, chunks[:settings.RERANK_TOP_K])
+
+        # Step 4: Deduplicate by page — keep highest-scoring chunk per page
+        seen_pages = {}
+        for chunk in reranked:
+            pid = chunk["page_id"]
+            if pid not in seen_pages or chunk.get("score", 0) > seen_pages[pid].get("score", 0):
+                seen_pages[pid] = chunk
+
+        result = sorted(seen_pages.values(), key=lambda x: x.get("score", 0), reverse=True)
+        return result[:top_k]
+
+    def _extract_keywords(self, query: str) -> list[str]:
+        """Extract technical keywords (part numbers, spec values) from query."""
+        keywords = []
+        for pattern in KEYWORD_PATTERNS:
+            keywords.extend(pattern.findall(query))
+        return keywords
 
     async def retrieve_pages(
         self,

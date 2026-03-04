@@ -49,6 +49,9 @@ async def on_startup(ctx: dict) -> None:
     ctx["together_api_key"] = _config.TOGETHER_API_KEY
     ctx["collection_name"] = _config.COLLECTION_NAME
 
+    # arq redis reference for enqueuing sub-jobs
+    ctx["redis"] = ctx.get("redis")  # arq injects this automatically
+
     # Processing config
     ctx["config"] = _config
 

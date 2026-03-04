@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BookOpen,
   FileText,
+  Image as ImageIcon,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -50,6 +51,13 @@ export default function ManualDetailPage() {
   const [manual, setManual] = useState<ManualDetail | null>(null);
   const [pages, setPages] = useState<Page[]>([]);
   const [loading, setLoading] = useState(true);
+  const [progressStage, setProgressStage] = useState("");
+  const [progressPage, setProgressPage] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+  const [expandedImage, setExpandedImage] = useState<number | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
 
   useEffect(() => {
     async function load() {
@@ -69,7 +77,7 @@ export default function ManualDetailPage() {
     load();
   }, [manualId, router]);
 
-  // Poll while processing
+  // SSE progress stream while processing
   useEffect(() => {
     if (
       !manual ||
@@ -77,19 +85,54 @@ export default function ManualDetailPage() {
     )
       return;
 
-    const interval = setInterval(async () => {
-      try {
-        const [m, p] = await Promise.all([
-          api.get<ManualDetail>(`/api/manuals/${manualId}`),
-          api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []),
-        ]);
-        setManual(m);
-        setPages(p);
-      } catch {}
-    }, 3000);
+    const es = new EventSource(
+      `${apiBase}/api/manuals/${manualId}/progress`,
+      { withCredentials: true }
+    );
+    eventSourceRef.current = es;
 
-    return () => clearInterval(interval);
-  }, [manual, manualId]);
+    es.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setProgressStage(data.stage || "");
+        setProgressPage(data.page || 0);
+        setProgressTotal(data.total || 0);
+
+        if (data.stage === "ready" || data.stage === "failed") {
+          es.close();
+          // Refresh full data
+          const [m, p] = await Promise.all([
+            api.get<ManualDetail>(`/api/manuals/${manualId}`),
+            api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []),
+          ]);
+          setManual(m);
+          setPages(p);
+        }
+      } catch {}
+    };
+
+    es.onerror = () => {
+      // Fallback to polling if SSE fails
+      es.close();
+      const interval = setInterval(async () => {
+        try {
+          const [m, p] = await Promise.all([
+            api.get<ManualDetail>(`/api/manuals/${manualId}`),
+            api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []),
+          ]);
+          setManual(m);
+          setPages(p);
+          if (m.upload_status === "ready" || m.upload_status === "failed") {
+            clearInterval(interval);
+          }
+        } catch {}
+      }, 3000);
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [manual?.upload_status, manualId, apiBase]);
 
   const handleDelete = async () => {
     if (!confirm("Delete this manual and all its data?")) return;
@@ -149,11 +192,19 @@ export default function ManualDetailPage() {
             <div className="flex-1">
               <p className="text-sm font-medium">Processing manual...</p>
               <p className="text-xs text-muted-foreground">
-                {pages.length} of {manual.total_pages || "?"} pages processed
+                {progressStage
+                  ? `Stage: ${progressStage} — page ${progressPage} of ${progressTotal || manual.total_pages || "?"}`
+                  : `${pages.length} of ${manual.total_pages || "?"} pages processed`}
               </p>
-              {manual.total_pages && manual.total_pages > 0 && (
+              {(progressTotal || manual.total_pages) && (progressTotal || (manual.total_pages ?? 0)) > 0 && (
                 <Progress
-                  value={(pages.length / manual.total_pages) * 100}
+                  value={
+                    progressTotal > 0
+                      ? (progressPage / progressTotal) * 100
+                      : manual.total_pages
+                        ? (pages.length / manual.total_pages) * 100
+                        : 0
+                  }
                   className="mt-2 h-1.5"
                 />
               )}
@@ -231,11 +282,29 @@ export default function ManualDetailPage() {
               {pages.map((page) => (
                 <Card key={page.id}>
                   <CardContent className="flex items-start gap-4 p-4">
-                    <Badge variant="secondary" className="shrink-0">
-                      p.{page.page_number + 1}
-                    </Badge>
+                    {/* Page image thumbnail */}
+                    <button
+                      className="shrink-0 overflow-hidden rounded border bg-slate-100"
+                      onClick={() =>
+                        setExpandedImage(
+                          expandedImage === page.page_number ? null : page.page_number
+                        )
+                      }
+                      title="Click to expand"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                        alt={`Page ${page.page_number + 1}`}
+                        className="h-16 w-12 object-cover"
+                        loading="lazy"
+                      />
+                    </button>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="shrink-0">
+                          p.{page.page_number + 1}
+                        </Badge>
                         <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                         <span className="text-xs text-muted-foreground">
                           {classificationLabels[page.classification] || page.classification}
@@ -258,6 +327,17 @@ export default function ManualDetailPage() {
                       )}
                     </div>
                   </CardContent>
+                  {/* Expanded image view */}
+                  {expandedImage === page.page_number && (
+                    <div className="border-t p-4">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                        alt={`Page ${page.page_number + 1} full`}
+                        className="mx-auto max-h-[70vh] rounded border shadow-sm"
+                      />
+                    </div>
+                  )}
                 </Card>
               ))}
             </div>

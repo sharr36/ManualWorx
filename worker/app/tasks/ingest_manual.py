@@ -1,6 +1,7 @@
 """Manual ingestion orchestrator task."""
 
 import asyncio
+import json
 import traceback
 from functools import partial
 from uuid import UUID
@@ -9,6 +10,18 @@ from ..pipeline.chunker import Chunker
 from ..pipeline.embedder import Embedder
 from ..pipeline.ocr_processor import OCRProcessor
 from ..pipeline.pdf_splitter import PDFSplitter
+
+
+async def _publish_progress(ctx: dict, manual_id: str, stage: str, page: int = 0, total: int = 0):
+    """Publish ingestion progress to Redis pub/sub."""
+    redis = ctx.get("redis")
+    if not redis:
+        return
+    try:
+        msg = json.dumps({"stage": stage, "page": page, "total": total, "manual_id": manual_id})
+        await redis.publish(f"progress:{manual_id}", msg)
+    except Exception:
+        pass
 
 
 async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
@@ -37,6 +50,7 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             )
 
         # 2. Download PDF from storage
+        await _publish_progress(ctx, manual_id, "downloading")
         storage_key = f"manuals/{tenant_id}/{manual_id}/original.pdf"
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
@@ -57,6 +71,7 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             )
 
         # 4. Process each page: OCR + classify + store
+        await _publish_progress(ctx, manual_id, "ocr", page=0, total=page_count)
         ocr = OCRProcessor(max_concurrent=config.MAX_CONCURRENT_PAGES)
         page_numbers = list(range(page_count))
         ocr_results = await ocr.process_batch(pdf_bytes, page_numbers)
@@ -65,8 +80,9 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
         page_images = splitter.split(pdf_bytes)
         pages_data = []  # For chunking: [{page_id, page_number, text, classification}]
 
-        for ocr_result, page_img in zip(ocr_results, page_images):
+        for idx, (ocr_result, page_img) in enumerate(zip(ocr_results, page_images)):
             pn = ocr_result["page_number"]
+            await _publish_progress(ctx, manual_id, "ocr", page=idx + 1, total=page_count)
 
             # Upload page image to storage
             image_key = f"manuals/{tenant_id}/{manual_id}/pages/{pn}.png"
@@ -114,6 +130,7 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             })
 
         # 5. Chunk all pages
+        await _publish_progress(ctx, manual_id, "chunking", page=page_count, total=page_count)
         chunker = Chunker(
             chunk_size=config.CHUNK_SIZE, overlap=config.CHUNK_OVERLAP
         )
@@ -138,6 +155,7 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                 chunk_records.append(chunk)
 
         # 6. Embed all chunks and upsert to Qdrant
+        await _publish_progress(ctx, manual_id, "embedding", page=page_count, total=page_count)
         if chunk_records:
             embedder = Embedder(
                 qdrant=ctx["qdrant"],
@@ -161,11 +179,25 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                     )
 
         # 7. Update status to 'ready'
+        await _publish_progress(ctx, manual_id, "ready", page=page_count, total=page_count)
         async with pool.acquire() as conn:
             await conn.execute(
                 "UPDATE manuals SET upload_status = 'ready', updated_at = NOW() WHERE id = $1",
                 UUID(manual_id),
             )
+
+        # 8. Enqueue AI page classification (refines heuristic results in background)
+        page_ids_for_classify = [p["page_id"] for p in pages_data]
+        if page_ids_for_classify:
+            try:
+                from arq.connections import ArqRedis
+                arq_redis: ArqRedis | None = ctx.get("redis")
+                if arq_redis:
+                    await arq_redis.enqueue_job(
+                        "classify_pages", manual_id, page_ids_for_classify
+                    )
+            except Exception:
+                pass  # Classification is non-critical enhancement
 
         return {
             "status": "ready",

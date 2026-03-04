@@ -30,6 +30,9 @@ class WorkerSettings(BaseSettings):
     COLLECTION_NAME: str = "manualworx_chunks"
     EMBEDDING_DIMENSION: int = 768
 
+    # Classification
+    CLASSIFICATION_MODEL: str = "claude-haiku-4-5-20251001"
+
     # Processing
     PDF_DPI: int = 300
     MAX_CONCURRENT_PAGES: int = 4

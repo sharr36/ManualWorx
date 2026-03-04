@@ -1,8 +1,11 @@
 """Manual management endpoints."""
 
+import asyncio
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from ..models.manual import ManualDetailResponse, ManualResponse, PageResponse
 from ..services.manual_service import ManualService
@@ -101,6 +104,93 @@ async def get_manual_pages(manual_id: UUID, request: Request) -> list[PageRespon
         )
         for p in pages
     ]
+
+
+@router.get("/{manual_id}/progress")
+async def manual_progress(manual_id: UUID, request: Request):
+    """Stream ingestion progress via SSE.
+
+    Subscribes to Redis pub/sub channel `progress:{manual_id}` and streams
+    events until the manual reaches 'ready' or 'failed' status.
+    """
+    redis = getattr(request.app.state, "redis", None)
+    if not redis:
+        raise HTTPException(status_code=503, detail="Progress tracking unavailable")
+
+    async def event_generator():
+        pubsub = redis.pubsub()
+        channel = f"progress:{manual_id}"
+        await pubsub.subscribe(channel)
+        try:
+            while True:
+                msg = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=1.0
+                )
+                if msg and msg["type"] == "message":
+                    data = msg["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    yield f"data: {data}\n\n"
+
+                    # Close stream when done
+                    try:
+                        parsed = json.loads(data)
+                        if parsed.get("stage") in ("ready", "failed"):
+                            break
+                    except Exception:
+                        pass
+                else:
+                    # Send keepalive to prevent connection timeout
+                    yield ": keepalive\n\n"
+                    await asyncio.sleep(1)
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/{manual_id}/pages/{page_number}/image")
+async def get_page_image(manual_id: UUID, page_number: int, request: Request):
+    """Proxy page images via pre-signed URL redirect.
+
+    Generates a pre-signed Tigris URL and redirects the client, avoiding
+    exposure of S3 credentials.
+    """
+    pool = request.app.state.db_pool
+    tenant_id = request.state.tenant_id
+
+    # Verify the page exists and belongs to the tenant
+    async with pool.acquire() as conn:
+        page = await conn.fetchrow(
+            """
+            SELECT p.image_url
+            FROM pages p
+            JOIN manuals m ON p.manual_id = m.id
+            WHERE p.manual_id = $1 AND p.page_number = $2 AND m.tenant_id = $3
+            """,
+            manual_id,
+            page_number,
+            tenant_id,
+        )
+
+    if not page or not page["image_url"]:
+        raise HTTPException(status_code=404, detail="Page image not found")
+
+    # Generate pre-signed URL from storage provider
+    from ..providers import get_storage_provider
+    storage = get_storage_provider()
+    url = await storage.get_url(page["image_url"])
+
+    return RedirectResponse(url=url, status_code=302)
 
 
 @router.delete("/{manual_id}")

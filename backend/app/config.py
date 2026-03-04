@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     MAX_PAGES_PER_QUERY: int = 10
     STREAM_RESPONSES: bool = True
 
+    # Re-ranking
+    RERANK_ENABLED: bool = True
+    RERANK_TOP_K: int = 40
+    RERANK_FINAL_K: int = 10
+    RERANK_MODEL: str = "claude-haiku-4-5-20251001"
+
     # Schematic Viewer
     SYMBOL_LIBRARY_PATH: str = "/app/assets/symbols/"
     ANNOTATION_CACHE_TTL: int = 86400

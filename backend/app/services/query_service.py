@@ -1,6 +1,8 @@
 """Query orchestration service — ties retrieval and AI together."""
 
+import json
 import time
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -37,10 +39,15 @@ class QueryService:
         """
         start = time.monotonic()
 
-        # 1. Retrieve relevant chunks
-        chunks = await self.retrieval.retrieve_chunks(
-            pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
-        )
+        # 1. Retrieve relevant chunks (with re-ranking when enabled)
+        if settings.RERANK_ENABLED:
+            chunks = await self.retrieval.retrieve_with_rerank(
+                pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
+            )
+        else:
+            chunks = await self.retrieval.retrieve_chunks(
+                pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
+            )
 
         # 2. Generate AI response
         ai_result = await self.ai.generate_response(
@@ -121,6 +128,107 @@ class QueryService:
             "latency_ms": total_latency,
             "created_at": datetime.now().isoformat(),
         }
+
+    async def create_query_stream(
+        self,
+        pool: asyncpg.Pool,
+        redis,
+        tenant_id: UUID,
+        query_text: str,
+        query_mode: str,
+        manual_ids: list[str] | None = None,
+        skill_level: str | None = None,
+        session_id: UUID | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream a query response as SSE events.
+
+        Same retrieval pipeline as create_query(), but streams tokens
+        via generate_response_stream(). After streaming completes,
+        stores the full response in DB.
+        """
+        start = time.monotonic()
+
+        # 1. Retrieve relevant chunks (with re-ranking when enabled)
+        if settings.RERANK_ENABLED:
+            chunks = await self.retrieval.retrieve_with_rerank(
+                pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
+            )
+        else:
+            chunks = await self.retrieval.retrieve_chunks(
+                pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
+            )
+
+        # 2. Stream AI response, collecting the done event for DB storage
+        done_data = None
+        async for event in self.ai.generate_response_stream(
+            query_text=query_text,
+            query_mode=query_mode,
+            context_chunks=chunks,
+            skill_level=skill_level,
+        ):
+            yield event
+            # Capture the done event payload for persistence
+            if '"type": "done"' in event:
+                try:
+                    payload = json.loads(event.replace("data: ", "").strip())
+                    done_data = payload
+                except Exception:
+                    pass
+
+        if not done_data:
+            return
+
+        total_latency = int((time.monotonic() - start) * 1000)
+
+        # 3. Store in database
+        input_cost = done_data.get("input_tokens", 0) * 0.003 / 1000
+        output_cost = done_data.get("output_tokens", 0) * 0.015 / 1000
+        cost_estimate = round(input_cost + output_cost, 6)
+
+        retrieved_page_ids = list({c["page_id"] for c in chunks})
+        manual_uuid_array = [UUID(mid) for mid in manual_ids] if manual_ids else None
+
+        query_id = uuid4()
+        if not session_id:
+            session_id = uuid4()
+
+        try:
+            async with pool.acquire() as conn:
+                await set_tenant_context(conn, tenant_id)
+                await conn.execute(
+                    """
+                    INSERT INTO queries (id, tenant_id, session_id, query_text, query_mode,
+                                         manual_ids, retrieved_page_ids, response_text,
+                                         model_used, input_tokens, output_tokens,
+                                         cost_estimate, latency_ms)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    """,
+                    query_id,
+                    tenant_id,
+                    session_id,
+                    query_text,
+                    query_mode,
+                    manual_uuid_array,
+                    [UUID(pid) for pid in retrieved_page_ids],
+                    done_data.get("response_text", ""),
+                    done_data.get("model_used", settings.DEFAULT_MODEL),
+                    done_data.get("input_tokens", 0),
+                    done_data.get("output_tokens", 0),
+                    cost_estimate,
+                    total_latency,
+                )
+        except Exception:
+            pass  # Don't fail the stream if DB write fails
+
+        # 4. Increment usage counter
+        if redis:
+            month_key = datetime.now().strftime("%Y-%m")
+            usage_key = f"usage:{tenant_id}:{month_key}:queries"
+            try:
+                await redis.incr(usage_key)
+                await redis.expire(usage_key, 86400 * 35)
+            except Exception:
+                pass
 
     async def followup_query(
         self,
