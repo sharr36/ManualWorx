@@ -23,6 +23,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  queryId?: string;
   confidence?: number;
   confidenceLevel?: ConfidenceLevel;
   sources?: Source[];
@@ -340,6 +341,7 @@ export default function QueryPage() {
                 m.id === assistantId
                   ? {
                       ...m,
+                      queryId: data.query_id as string | undefined,
                       claims: data.claims as Claim[] | undefined,
                       contradictionCount: data.contradiction_count as
                         | number
@@ -378,6 +380,23 @@ export default function QueryPage() {
       }
     },
     [loading, selectedManual, mode]
+  );
+
+  const handleGenerateDoc = useCallback(
+    async (queryId: string, docType: string) => {
+      try {
+        await api.post("/api/documents/generate", {
+          query_id: queryId,
+          doc_type: docType,
+          format: "pdf",
+        });
+        // Navigate to documents page on success
+        window.location.href = "/documents";
+      } catch {
+        alert("Failed to generate document. Please try again.");
+      }
+    },
+    []
   );
 
   const handleKeyDown = useCallback(
@@ -475,6 +494,11 @@ export default function QueryPage() {
                 sources={msg.sources?.map(
                   (s) => `p.${s.page_number + 1} (${s.classification})`
                 )}
+                onGenerateDoc={
+                  msg.role === "assistant" && msg.queryId
+                    ? (docType) => handleGenerateDoc(msg.queryId!, docType)
+                    : undefined
+                }
               />
               {/* Claim breakdown below assistant messages */}
               {msg.role === "assistant" && msg.claims && msg.claims.length > 0 && (

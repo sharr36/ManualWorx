@@ -284,7 +284,7 @@ class QueryService:
                     claims=claims,
                 )
 
-            yield f"data: {json.dumps({'type': 'claims', 'claims': claims, 'overall_confidence': overall, 'contradiction_count': claim_result.get('contradiction_count', 0), 'safety_claims': claim_result.get('safety_claims', 0), 'refinements': refinements})}\n\n"
+            yield f"data: {json.dumps({'type': 'claims', 'query_id': str(query_id), 'claims': claims, 'overall_confidence': overall, 'contradiction_count': claim_result.get('contradiction_count', 0), 'safety_claims': claim_result.get('safety_claims', 0), 'refinements': refinements})}\n\n"
         except Exception:
             pass
 

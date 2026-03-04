@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, FileDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ConfidenceBar } from "@/components/ui/confidence-bar";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ interface ChatMessageProps {
   sources?: string[];
   latency_ms?: number;
   className?: string;
+  onGenerateDoc?: (docType: string) => void;
 }
 
 function renderMarkdown(text: string) {
@@ -147,6 +148,13 @@ function formatInline(text: string): React.ReactNode {
   return parts.length > 0 ? <>{parts}</> : text;
 }
 
+const DOC_OPTIONS = [
+  { value: "troubleshooting_guide", label: "Troubleshooting Guide" },
+  { value: "service_procedure", label: "Service Procedure" },
+  { value: "quick_reference", label: "Quick Reference" },
+  { value: "parts_reference", label: "Parts Reference" },
+];
+
 export function ChatMessage({
   role,
   content,
@@ -155,8 +163,10 @@ export function ChatMessage({
   sources,
   latency_ms,
   className,
+  onGenerateDoc,
 }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
+  const [showDocMenu, setShowDocMenu] = useState(false);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -203,6 +213,35 @@ export function ChatMessage({
             )}
             {copied ? "Copied" : "Copy"}
           </Button>
+          {onGenerateDoc && (
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs"
+                onClick={() => setShowDocMenu(!showDocMenu)}
+              >
+                <FileDown className="mr-1 h-3 w-3" />
+                Generate Doc
+              </Button>
+              {showDocMenu && (
+                <div className="absolute bottom-full left-0 z-10 mb-1 rounded-md border bg-white shadow-lg">
+                  {DOC_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-xs hover:bg-slate-50"
+                      onClick={() => {
+                        onGenerateDoc(opt.value);
+                        setShowDocMenu(false);
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {latency_ms !== undefined && (
             <span className="text-xs text-muted-foreground">
               {latency_ms < 1000

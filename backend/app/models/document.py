@@ -13,7 +13,10 @@ class DocGenerateRequest(BaseModel):
 
 class DocResponse(BaseModel):
     id: str
+    query_id: str | None = None
     doc_type: str
     format: str
-    file_url: str | None
-    created_at: str
+    file_url: str | None = None
+    query_text: str | None = None
+    latency_ms: int | None = None
+    created_at: str | None = None
