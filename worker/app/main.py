@@ -1,6 +1,10 @@
 """arq worker entry point."""
 
+import asyncpg
+import boto3
 from arq.connections import RedisSettings
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import Distance, VectorParams
 
 from .config import WorkerSettings as Config
 from .tasks.annotate_diagram import annotate_diagram
@@ -11,6 +15,50 @@ from .tasks.ingest_manual import ingest_manual
 from .tasks.process_page import process_page
 
 _config = Config()
+
+
+async def on_startup(ctx: dict) -> None:
+    """Initialize shared resources for all worker tasks."""
+    # Database pool
+    ctx["pool"] = await asyncpg.create_pool(
+        _config.DATABASE_URL, min_size=2, max_size=10
+    )
+
+    # Qdrant client + ensure collection exists
+    ctx["qdrant"] = AsyncQdrantClient(url=_config.QDRANT_URL)
+    collections = await ctx["qdrant"].get_collections()
+    existing = {c.name for c in collections.collections}
+    if _config.COLLECTION_NAME not in existing:
+        await ctx["qdrant"].create_collection(
+            collection_name=_config.COLLECTION_NAME,
+            vectors_config=VectorParams(
+                size=_config.EMBEDDING_DIMENSION, distance=Distance.COSINE
+            ),
+        )
+
+    # S3/Tigris storage client
+    ctx["s3"] = boto3.client(
+        "s3",
+        endpoint_url=_config.AWS_ENDPOINT_URL_S3,
+        aws_access_key_id=_config.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=_config.AWS_SECRET_ACCESS_KEY,
+    )
+    ctx["bucket"] = _config.BUCKET_NAME
+
+    # Embedding config
+    ctx["together_api_key"] = _config.TOGETHER_API_KEY
+    ctx["collection_name"] = _config.COLLECTION_NAME
+
+    # Processing config
+    ctx["config"] = _config
+
+
+async def on_shutdown(ctx: dict) -> None:
+    """Clean up shared resources."""
+    if "pool" in ctx:
+        await ctx["pool"].close()
+    if "qdrant" in ctx:
+        await ctx["qdrant"].close()
 
 
 class WorkerSettings:
@@ -24,6 +72,9 @@ class WorkerSettings:
         annotate_diagram,
         generate_learning_path,
     ]
+
+    on_startup = on_startup
+    on_shutdown = on_shutdown
 
     redis_settings = RedisSettings.from_dsn(_config.REDIS_URL)
 

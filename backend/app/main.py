@@ -55,9 +55,19 @@ async def lifespan(app: FastAPI):
     app.state.qdrant = None
     try:
         from qdrant_client import AsyncQdrantClient
+        from qdrant_client.models import Distance, VectorParams
 
         app.state.qdrant = AsyncQdrantClient(url=settings.QDRANT_URL)
-        await app.state.qdrant.get_collections()
+        collections = await app.state.qdrant.get_collections()
+        existing = {c.name for c in collections.collections}
+        if settings.COLLECTION_NAME not in existing:
+            await app.state.qdrant.create_collection(
+                collection_name=settings.COLLECTION_NAME,
+                vectors_config=VectorParams(
+                    size=settings.EMBEDDING_DIMENSION, distance=Distance.COSINE
+                ),
+            )
+            print(f"  Qdrant collection '{settings.COLLECTION_NAME}' created")
         print("  Qdrant connected")
     except Exception as e:
         print(f"  Qdrant not available: {e}")

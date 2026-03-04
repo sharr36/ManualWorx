@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     EMBEDDING_SERVICE_URL: str = ""
     TOGETHER_API_KEY: str = ""
 
+    # Vector
+    COLLECTION_NAME: str = "manualworx_chunks"
+    EMBEDDING_DIMENSION: int = 768
+
     # App
     SECRET_KEY: str = "change-me-to-a-random-secret-at-least-32-chars"
     CORS_ORIGINS: str = "http://localhost:3000"

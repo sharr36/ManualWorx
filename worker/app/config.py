@@ -23,11 +23,19 @@ class WorkerSettings(BaseSettings):
     EMBEDDING_SERVICE_URL: str = ""
     TOGETHER_API_KEY: str = ""
 
+    # AI
+    ANTHROPIC_API_KEY: str = ""
+
+    # Vector
+    COLLECTION_NAME: str = "manualworx_chunks"
+    EMBEDDING_DIMENSION: int = 768
+
     # Processing
     PDF_DPI: int = 300
     MAX_CONCURRENT_PAGES: int = 4
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
+    EMBED_BATCH_SIZE: int = 32
 
     class Config:
         env_file = ".env"

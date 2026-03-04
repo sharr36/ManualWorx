@@ -8,9 +8,11 @@ dependencies = [
     "asyncpg>=0.29",
     "redis>=5.0",
     "PyMuPDF>=1.24",
-    "pdf2image>=1.17",
     "Pillow>=10.0",
     "httpx>=0.27",
+    "boto3>=1.35",
+    "qdrant-client>=1.12",
+    "pydantic-settings>=2.0",
     "manualworx-shared @ file:///${PROJECT_ROOT}/../shared",
 ]
 

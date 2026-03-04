@@ -1,0 +1,237 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import { Upload, X, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import { api } from "@/lib/api-client";
+import type { Manual } from "@/types";
+
+interface UploadDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: (manual: Manual) => void;
+}
+
+export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
+  const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState("");
+  const [make, setMake] = useState("");
+  const [model, setModel] = useState("");
+  const [manualType, setManualType] = useState("service");
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const reset = useCallback(() => {
+    setFile(null);
+    setTitle("");
+    setMake("");
+    setModel("");
+    setManualType("service");
+    setError("");
+    setUploading(false);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    if (!uploading) {
+      reset();
+      onClose();
+    }
+  }, [uploading, reset, onClose]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const dropped = e.dataTransfer.files[0];
+    if (dropped?.type === "application/pdf") {
+      setFile(dropped);
+      if (!title) setTitle(dropped.name.replace(/\.pdf$/i, ""));
+    } else {
+      setError("Only PDF files are accepted");
+    }
+  }, [title]);
+
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const selected = e.target.files?.[0];
+      if (selected) {
+        setFile(selected);
+        if (!title) setTitle(selected.name.replace(/\.pdf$/i, ""));
+        setError("");
+      }
+    },
+    [title]
+  );
+
+  const handleSubmit = useCallback(async () => {
+    if (!file || !title.trim()) return;
+
+    setUploading(true);
+    setError("");
+
+    try {
+      const result = await api.uploadFile<Manual>("/api/manuals/upload", file, {
+        title: title.trim(),
+        make: make.trim() || "",
+        model: model.trim() || "",
+        manual_type: manualType,
+      });
+      reset();
+      onSuccess(result);
+    } catch (err: any) {
+      setError(err.detail || "Upload failed");
+      setUploading(false);
+    }
+  }, [file, title, make, model, manualType, reset, onSuccess]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div
+        className="absolute inset-0 bg-black/50"
+        onClick={handleClose}
+      />
+      <div className="relative z-10 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Upload Manual</h2>
+          <button onClick={handleClose} disabled={uploading}>
+            <X className="h-5 w-5 text-slate-400 hover:text-slate-600" />
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          {/* File drop zone */}
+          <div
+            className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition ${
+              dragOver
+                ? "border-emerald-500 bg-emerald-50"
+                : file
+                  ? "border-emerald-500 bg-emerald-50/50"
+                  : "border-slate-300 hover:border-slate-400"
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => inputRef.current?.click()}
+          >
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".pdf"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+            {file ? (
+              <div className="flex items-center gap-3">
+                <FileText className="h-8 w-8 text-emerald-600" />
+                <div>
+                  <p className="font-medium">{file.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {(file.size / 1024 / 1024).toFixed(1)} MB
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <Upload className="mb-2 h-8 w-8 text-slate-400" />
+                <p className="text-sm font-medium">
+                  Drop a PDF here or click to browse
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Supports PDFs up to 5,000+ pages
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* Metadata fields */}
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="title">Title *</Label>
+              <Input
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g., CAT 320 Excavator Service Manual"
+                disabled={uploading}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="make">Make</Label>
+                <Input
+                  id="make"
+                  value={make}
+                  onChange={(e) => setMake(e.target.value)}
+                  placeholder="e.g., Caterpillar"
+                  disabled={uploading}
+                />
+              </div>
+              <div>
+                <Label htmlFor="model">Model</Label>
+                <Input
+                  id="model"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="e.g., 320 GC"
+                  disabled={uploading}
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="type">Manual Type</Label>
+              <select
+                id="type"
+                value={manualType}
+                onChange={(e) => setManualType(e.target.value)}
+                disabled={uploading}
+                className="mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm"
+              >
+                <option value="service">Service Manual</option>
+                <option value="operator">Operator Manual</option>
+                <option value="parts">Parts Manual</option>
+              </select>
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-sm text-red-600">{error}</p>
+          )}
+
+          {uploading && (
+            <div className="space-y-1">
+              <Progress value={undefined} className="h-2" />
+              <p className="text-center text-xs text-muted-foreground">
+                Uploading...
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={handleClose}
+              disabled={uploading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={!file || !title.trim() || uploading}
+            >
+              {uploading ? "Uploading..." : "Upload Manual"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

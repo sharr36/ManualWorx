@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   BookOpen,
   CreditCard,
@@ -11,10 +12,38 @@ import {
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { api } from "@/lib/api-client";
+import type { Manual } from "@/types";
+
+interface DashboardStats {
+  manuals: number;
+  manuals_ready: number;
+  manuals_processing: number;
+}
 
 export default function DashboardPage() {
   const { user, tenant } = useAuth();
+  const [stats, setStats] = useState<DashboardStats>({
+    manuals: 0,
+    manuals_ready: 0,
+    manuals_processing: 0,
+  });
+
+  useEffect(() => {
+    api
+      .get<Manual[]>("/api/manuals")
+      .then((data) => {
+        setStats({
+          manuals: data.length,
+          manuals_ready: data.filter((m) => m.upload_status === "ready").length,
+          manuals_processing: data.filter(
+            (m) => m.upload_status === "processing" || m.upload_status === "pending"
+          ).length,
+        });
+      })
+      .catch(() => {});
+  }, []);
 
   if (!user || !tenant) return null;
 
@@ -45,8 +74,12 @@ export default function DashboardPage() {
         <StatCard
           icon={BookOpen}
           title="Manuals"
-          value="0"
-          subtitle="uploaded"
+          value={String(stats.manuals)}
+          subtitle={
+            stats.manuals_processing > 0
+              ? `${stats.manuals_ready} ready, ${stats.manuals_processing} processing`
+              : "uploaded"
+          }
           color="text-emerald-600"
         />
         <StatCard
