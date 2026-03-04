@@ -55,6 +55,68 @@ Provide a systematic troubleshooting approach:
 
 Always cite page numbers for referenced procedures and specs."""
 
+DIAGRAM_PROMPT = """Based on the following service manual pages and diagram annotations, explain the diagram/schematic related to this query:
+
+QUESTION: {query}
+
+CONTEXT PAGES:
+{context}
+
+{diagram_context}
+
+Provide a clear explanation that:
+1. Identifies the relevant components and their functions
+2. Traces flow paths (hydraulic fluid, electrical current, etc.)
+3. Explains operating states and how the system behaves
+4. Notes any key specifications (pressures, voltages, etc.)
+5. References specific components by their designators (V1, M2, etc.)
+
+Always cite page numbers. Use component designators when available."""
+
+PROCEDURE_PROMPT = """Based on the following service manual pages, provide a step-by-step service procedure for:
+
+TASK: {query}
+
+CONTEXT PAGES:
+{context}
+
+Format as a complete service procedure:
+
+## Prerequisites
+- Required tools and equipment
+- Required parts and fluids
+- Safety equipment needed
+
+## Safety Precautions
+⚠️ List ALL safety warnings and cautions
+
+## Procedure Steps
+1. [Detailed numbered steps]
+   - Include torque specifications, measurements, and tolerances
+   - Note any special techniques or sequence requirements
+
+## Verification
+- How to verify the procedure was completed correctly
+- Expected readings, clearances, or test results
+
+## Specifications
+| Parameter | Value | Tolerance |
+List all relevant specs in a table.
+
+Always cite page numbers for each specification and procedure step."""
+
+AUTO_DETECT_PROMPT = """Classify this mechanic's query into the best query mode.
+
+Query: "{query}"
+
+Choose ONE mode:
+- "qa" — General question about specs, part numbers, capacities, locations
+- "troubleshoot" — Problem description, symptom, fault code, malfunction
+- "diagram" — Asks about schematics, wiring, hydraulic circuits, flow paths, component connections
+- "procedure" — Asks how to do something: remove, install, adjust, replace, service, inspect
+
+Return ONLY the mode word, nothing else."""
+
 
 class AIService:
     """Handles prompting Claude with retrieved context and generating responses."""
@@ -84,11 +146,8 @@ class AIService:
         # Build context string from chunks
         context = self._build_context(context_chunks)
 
-        # Select prompt template
-        if query_mode == "troubleshoot":
-            user_prompt = TROUBLESHOOT_PROMPT.format(query=query_text, context=context)
-        else:
-            user_prompt = QA_PROMPT.format(query=query_text, context=context)
+        # Select prompt template based on mode
+        user_prompt = self._select_prompt(query_text, query_mode, context, context_chunks)
 
         # Add skill level instruction
         system = SYSTEM_PROMPT
@@ -180,10 +239,8 @@ class AIService:
         """
         context = self._build_context(context_chunks)
 
-        if query_mode == "troubleshoot":
-            user_prompt = TROUBLESHOOT_PROMPT.format(query=query_text, context=context)
-        else:
-            user_prompt = QA_PROMPT.format(query=query_text, context=context)
+        # Select prompt template based on mode
+        user_prompt = self._select_prompt(query_text, query_mode, context, context_chunks)
 
         system = SYSTEM_PROMPT
         if skill_level == "green":
@@ -454,6 +511,87 @@ Important:
             "model_used": settings.DEFAULT_MODEL,
             "latency_ms": latency_ms,
         }
+
+    async def auto_detect_mode(self, query_text: str) -> str:
+        """Use Claude to classify query intent into the best mode."""
+        try:
+            response = await self.client.messages.create(
+                model=getattr(settings, "RERANK_MODEL", "claude-haiku-4-5-20251001"),
+                max_tokens=16,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": AUTO_DETECT_PROMPT.format(query=query_text),
+                    }
+                ],
+            )
+            mode = response.content[0].text.strip().lower().strip('"')
+            if mode in ("qa", "troubleshoot", "diagram", "procedure"):
+                return mode
+        except Exception:
+            pass
+        return "qa"
+
+    def _select_prompt(
+        self,
+        query_text: str,
+        query_mode: str,
+        context: str,
+        context_chunks: list[dict],
+    ) -> str:
+        """Select the appropriate prompt template based on query mode."""
+        if query_mode == "troubleshoot":
+            return TROUBLESHOOT_PROMPT.format(query=query_text, context=context)
+        elif query_mode == "diagram":
+            diagram_context = self._build_diagram_context(context_chunks)
+            return DIAGRAM_PROMPT.format(
+                query=query_text,
+                context=context,
+                diagram_context=diagram_context,
+            )
+        elif query_mode == "procedure":
+            return PROCEDURE_PROMPT.format(query=query_text, context=context)
+        else:
+            return QA_PROMPT.format(query=query_text, context=context)
+
+    def _build_diagram_context(self, chunks: list[dict]) -> str:
+        """Build additional diagram context from annotation data in chunks."""
+        diagram_sections = []
+        for chunk in chunks:
+            annotation = chunk.get("annotation_data")
+            if not annotation:
+                continue
+
+            components = annotation.get("components", [])
+            connections = annotation.get("connections", [])
+
+            if components:
+                comp_text = "Components on this diagram:\n"
+                for c in components[:20]:
+                    comp_text += f"  - {c.get('designator', '?')}: {c.get('name', 'unknown')} ({c.get('type', '')})"
+                    specs = c.get("specs", {})
+                    if specs:
+                        spec_str = ", ".join(f"{k}={v}" for k, v in specs.items())
+                        comp_text += f" [{spec_str}]"
+                    comp_text += "\n"
+                diagram_sections.append(comp_text)
+
+            if connections:
+                conn_text = "Connections:\n"
+                for c in connections[:30]:
+                    conn_text += f"  - {c.get('from_id', '?')} --[{c.get('line_type', '')}]--> {c.get('to_id', '?')}\n"
+                diagram_sections.append(conn_text)
+
+            states = chunk.get("operating_states") or annotation.get("operating_states", [])
+            if states:
+                state_text = "Operating states:\n"
+                for s in states[:5]:
+                    state_text += f"  - {s.get('name', '?')}: {s.get('description', '')}\n"
+                diagram_sections.append(state_text)
+
+        if diagram_sections:
+            return "DIAGRAM ANNOTATIONS:\n" + "\n".join(diagram_sections)
+        return "No diagram annotations available for these pages."
 
     async def generate_lesson(self, system_area, context_pages, depth="standard"):
         raise NotImplementedError("Phase 8")

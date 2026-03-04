@@ -168,6 +168,65 @@ class RetrievalService:
             keywords.extend(pattern.findall(query))
         return keywords
 
+    async def retrieve_with_diagram_context(
+        self,
+        pool: asyncpg.Pool,
+        tenant_id: UUID,
+        query_text: str,
+        manual_ids: list[str] | None = None,
+        top_k: int = 10,
+    ) -> list[dict]:
+        """Diagram-aware retrieval: boosts schematic pages and enriches with annotation data."""
+        import json as _json
+
+        if settings.RERANK_ENABLED:
+            chunks = await self.retrieve_with_rerank(
+                pool, tenant_id, query_text, manual_ids, top_k=top_k
+            )
+        else:
+            chunks = await self.retrieve_chunks(
+                pool, tenant_id, query_text, manual_ids, top_k=top_k * 2
+            )
+
+        diagram_classifications = {
+            "hydraulic_schematic", "electrical_diagram",
+            "wiring_harness", "diagnostic_flowchart",
+        }
+
+        for chunk in chunks:
+            cls = chunk.get("classification", "")
+            if cls in diagram_classifications:
+                chunk["score"] = min(chunk.get("score", 0) + 0.15, 1.0)
+            if chunk.get("has_diagram"):
+                chunk["score"] = min(chunk.get("score", 0) + 0.05, 1.0)
+
+        chunks.sort(key=lambda x: x.get("score", 0), reverse=True)
+        chunks = chunks[:top_k]
+
+        # Enrich with diagram annotation data
+        async with pool.acquire() as conn:
+            await set_tenant_context(conn, tenant_id)
+            for chunk in chunks:
+                cls = chunk.get("classification", "")
+                if cls in diagram_classifications or chunk.get("has_diagram"):
+                    try:
+                        ann = await conn.fetchrow(
+                            """SELECT annotation_data, operating_states
+                               FROM diagram_annotations
+                               WHERE page_id = $1 AND tenant_id = $2""",
+                            UUID(chunk["page_id"]),
+                            tenant_id,
+                        )
+                        if ann:
+                            ad = ann["annotation_data"]
+                            chunk["annotation_data"] = _json.loads(ad) if isinstance(ad, str) else ad
+                            os_data = ann["operating_states"]
+                            chunk["operating_states"] = (_json.loads(os_data) if isinstance(os_data, str) else os_data) or []
+                    except Exception:
+                        pass
+
+        return chunks
+
     async def retrieve_pages(
         self,
         pool: asyncpg.Pool,

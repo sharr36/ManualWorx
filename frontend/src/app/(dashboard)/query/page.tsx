@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   MessageSquare,
+  Plus,
   Send,
   Shield,
   Sparkles,
@@ -60,8 +61,11 @@ const EXAMPLE_QUERIES = [
 ];
 
 const MODE_MAP: Record<string, string> = {
+  Auto: "auto",
   "Q&A": "qa",
   Troubleshoot: "troubleshoot",
+  Diagram: "diagram",
+  Procedure: "procedure",
 };
 
 const CLAIM_TYPE_COLORS: Record<string, string> = {
@@ -213,11 +217,12 @@ export default function QueryPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [manuals, setManuals] = useState<Manual[]>([]);
-  const [selectedManual, setSelectedManual] = useState<string>("");
-  const [mode, setMode] = useState("qa");
+  const [selectedManuals, setSelectedManuals] = useState<string[]>([]);
+  const [mode, setMode] = useState("auto");
   const [lastSources, setLastSources] = useState<Source[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [sessionQueryId, setSessionQueryId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -285,10 +290,17 @@ export default function QueryPage() {
       ]);
 
       try {
-        const manual_ids = selectedManual ? [selectedManual] : undefined;
+        const manual_ids = selectedManuals.length > 0 ? selectedManuals : undefined;
+        const isFollowup = sessionQueryId && messages.length > 0;
+        const streamPath = isFollowup
+          ? `/api/query/${sessionQueryId}/followup/stream`
+          : "/api/query/stream";
+        const streamBody = isFollowup
+          ? { query_text: queryText.trim() }
+          : { query_text: queryText.trim(), query_mode: mode, manual_ids };
         await api.stream(
-          "/api/query/stream",
-          { query_text: queryText.trim(), query_mode: mode, manual_ids },
+          streamPath,
+          streamBody,
           // onToken
           (text) => {
             setMessages((prev) =>
@@ -336,12 +348,14 @@ export default function QueryPage() {
           },
           // onClaims
           (data) => {
+            const qid = data.query_id as string | undefined;
+            if (qid) setSessionQueryId(qid);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
                   ? {
                       ...m,
-                      queryId: data.query_id as string | undefined,
+                      queryId: qid,
                       claims: data.claims as Claim[] | undefined,
                       contradictionCount: data.contradiction_count as
                         | number
@@ -379,7 +393,7 @@ export default function QueryPage() {
         textareaRef.current?.focus();
       }
     },
-    [loading, selectedManual, mode]
+    [loading, selectedManuals, mode]
   );
 
   const handleGenerateDoc = useCallback(
@@ -548,6 +562,19 @@ export default function QueryPage() {
                 variant="ghost"
                 size="sm"
                 className="text-xs"
+                onClick={() => {
+                  setMessages([]);
+                  setSessionQueryId(null);
+                  setLastSources([]);
+                }}
+                title="New conversation"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs"
                 onClick={() => setShowHistory(!showHistory)}
                 title="Query history"
               >
@@ -560,17 +587,6 @@ export default function QueryPage() {
                   size="sm"
                   className="text-xs"
                   onClick={() => setMode(value)}
-                >
-                  {label}
-                </Button>
-              ))}
-              {["Diagram", "Procedure"].map((label) => (
-                <Button
-                  key={label}
-                  variant="ghost"
-                  size="sm"
-                  disabled
-                  className="text-xs"
                 >
                   {label}
                 </Button>
@@ -604,19 +620,40 @@ export default function QueryPage() {
         <h3 className="mb-3 text-sm font-semibold">Context</h3>
         <div className="space-y-3">
           <div>
-            <label className="text-xs text-muted-foreground">Manual</label>
-            <select
-              className="mt-1 w-full rounded-md border bg-white px-2 py-1.5 text-sm"
-              value={selectedManual}
-              onChange={(e) => setSelectedManual(e.target.value)}
-            >
-              <option value="">All manuals</option>
-              {manuals.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.title}
-                </option>
-              ))}
-            </select>
+            <label className="text-xs text-muted-foreground">Manuals</label>
+            <div className="mt-1 max-h-40 space-y-1 overflow-y-auto rounded-md border bg-white p-2">
+              {manuals.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No manuals available</p>
+              ) : (
+                manuals.map((m) => (
+                  <label key={m.id} className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={selectedManuals.includes(m.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedManuals((prev) => [...prev, m.id]);
+                        } else {
+                          setSelectedManuals((prev) =>
+                            prev.filter((id) => id !== m.id)
+                          );
+                        }
+                      }}
+                      className="rounded border-slate-300"
+                    />
+                    <span className="line-clamp-1">{m.title}</span>
+                  </label>
+                ))
+              )}
+            </div>
+            {selectedManuals.length > 0 && (
+              <button
+                className="mt-1 text-[10px] text-emerald-600 hover:underline"
+                onClick={() => setSelectedManuals([])}
+              >
+                Clear selection ({selectedManuals.length} selected)
+              </button>
+            )}
           </div>
           <div className="border-t pt-3">
             <h4 className="mb-2 text-xs font-medium text-muted-foreground">

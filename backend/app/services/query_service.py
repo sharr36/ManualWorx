@@ -41,8 +41,16 @@ class QueryService:
         """
         start = time.monotonic()
 
-        # 1. Retrieve relevant chunks (with re-ranking when enabled)
-        if settings.RERANK_ENABLED:
+        # 0. Auto-detect query mode if set to 'auto'
+        if query_mode == "auto":
+            query_mode = await self.ai.auto_detect_mode(query_text)
+
+        # 1. Retrieve relevant chunks (diagram-aware or standard)
+        if query_mode == "diagram":
+            chunks = await self.retrieval.retrieve_with_diagram_context(
+                pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
+            )
+        elif settings.RERANK_ENABLED:
             chunks = await self.retrieval.retrieve_with_rerank(
                 pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
             )
@@ -190,8 +198,16 @@ class QueryService:
         """
         start = time.monotonic()
 
-        # 1. Retrieve relevant chunks (with re-ranking when enabled)
-        if settings.RERANK_ENABLED:
+        # 0. Auto-detect query mode if set to 'auto'
+        if query_mode == "auto":
+            query_mode = await self.ai.auto_detect_mode(query_text)
+
+        # 1. Retrieve relevant chunks (diagram-aware or standard)
+        if query_mode == "diagram":
+            chunks = await self.retrieval.retrieve_with_diagram_context(
+                pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
+            )
+        elif settings.RERANK_ENABLED:
             chunks = await self.retrieval.retrieve_with_rerank(
                 pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
             )
@@ -298,6 +314,35 @@ class QueryService:
             except Exception:
                 pass
 
+    async def _get_session_history(
+        self, pool: asyncpg.Pool, tenant_id: UUID, session_id: UUID, limit: int = 5
+    ) -> str:
+        """Build conversation history from previous queries in the session."""
+        async with pool.acquire() as conn:
+            await set_tenant_context(conn, tenant_id)
+            rows = await conn.fetch(
+                """
+                SELECT query_text, response_text
+                FROM queries
+                WHERE session_id = $1 AND tenant_id = $2
+                ORDER BY created_at DESC
+                LIMIT $3
+                """,
+                session_id,
+                tenant_id,
+                limit,
+            )
+
+        if not rows:
+            return ""
+
+        # Build oldest-first history
+        turns = []
+        for r in reversed(rows):
+            resp = (r["response_text"] or "")[:500]
+            turns.append(f"Q: {r['query_text']}\nA: {resp}")
+        return "\n\n".join(turns)
+
     async def followup_query(
         self,
         pool: asyncpg.Pool,
@@ -323,8 +368,10 @@ class QueryService:
         if not original:
             raise ValueError("Original query not found")
 
-        # Build prior context
-        prior_context = f"Q: {original['query_text']}\nA: {original['response_text']}"
+        # Build full session history (up to 5 prior turns)
+        prior_context = await self._get_session_history(
+            pool, tenant_id, original["session_id"]
+        )
 
         # Get manual_ids from original query
         manual_ids = [str(m) for m in original["manual_ids"]] if original["manual_ids"] else None
@@ -334,8 +381,8 @@ class QueryService:
             pool, tenant_id, query_text, manual_ids, top_k=settings.MAX_PAGES_PER_QUERY
         )
 
-        # Generate follow-up response
-        ai_result = await self.ai.generate_followup(
+        # Generate follow-up response with conversation history
+        await self.ai.generate_followup(
             query_text=query_text,
             prior_context=prior_context,
             context_chunks=chunks,
@@ -352,6 +399,50 @@ class QueryService:
             skill_level=skill_level,
             session_id=original["session_id"],
         )
+
+    async def followup_query_stream(
+        self,
+        pool: asyncpg.Pool,
+        redis,
+        tenant_id: UUID,
+        query_id: UUID,
+        query_text: str,
+        skill_level: str | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream a follow-up query response as SSE events."""
+        # Fetch the original query for context
+        async with pool.acquire() as conn:
+            await set_tenant_context(conn, tenant_id)
+            original = await conn.fetchrow(
+                """
+                SELECT session_id, query_text, response_text, manual_ids, query_mode
+                FROM queries WHERE id = $1 AND tenant_id = $2
+                """,
+                query_id,
+                tenant_id,
+            )
+
+        if not original:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Original query not found'})}\n\n"
+            return
+
+        prior_context = await self._get_session_history(
+            pool, tenant_id, original["session_id"]
+        )
+        manual_ids = [str(m) for m in original["manual_ids"]] if original["manual_ids"] else None
+
+        # Use create_query_stream with the session context
+        async for event in self.create_query_stream(
+            pool=pool,
+            redis=redis,
+            tenant_id=tenant_id,
+            query_text=f"[Follow-up with context]\n{prior_context}\n\nNew question: {query_text}",
+            query_mode=original["query_mode"],
+            manual_ids=manual_ids,
+            skill_level=skill_level,
+            session_id=original["session_id"],
+        ):
+            yield event
 
     async def get_query(
         self, pool: asyncpg.Pool, tenant_id: UUID, query_id: UUID
