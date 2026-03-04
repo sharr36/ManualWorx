@@ -1,64 +1,49 @@
 # ManualWorx — Session Continuation Notes
 
-## Current Phase: Phase 2 — Advanced Retrieval + Page Classification
-
-### Plan File
-`/root/.claude/plans/cozy-exploring-pancake.md`
+## Current Status: Phase 6 Complete — Ready for Phase 7
 
 ### Branch
 `claude/manual-intelligence-platform-Q2RAK`
 
-### Phase 2 Batches
+### Commit History (this session)
+| Commit | Phase | Description |
+|--------|-------|-------------|
+| 78c9feb | Phase 2 | Advanced retrieval, streaming, page classification |
+| 1b4b317 | Phase 3 | Query refinement and per-claim confidence scoring |
+| 63c0072 | Phase 4 | Document generation from query responses |
+| 0800dbe | Phase 5 | Interactive schematic viewer with AI diagram annotation |
+| 8846f51 | Phase 6 | Inference engine with coverage analysis and gap detection |
 
-| Batch | Description | Status |
-|-------|-------------|--------|
-| 1 | Streaming query responses via SSE | In Progress |
-| 2 | AI page classification with Claude vision | Pending |
-| 3 | Hybrid retrieval + re-ranking | Pending |
-| 4 | Ingestion progress SSE + page image proxy | Pending |
-| 5 | Query history + UI polish | Pending |
+### Phase Completion Summary
 
-### Batch 1 Progress (Streaming Query Responses)
+**Phase 0** — Foundation: auth, billing, multi-tenancy, DB migrations, frontend scaffold
+**Phase 1** — PDF ingestion + basic query: worker pipeline, services, manuals + query pages
+**Phase 2** — SSE streaming, Claude vision classification, hybrid retrieval + re-ranking, ingestion progress, UI polish
+**Phase 3** — Per-claim confidence scoring, contradiction detection, refinement suggestions
+**Phase 4** — Document generation (PDF/DOCX) from query responses, templates, frontend documents page
+**Phase 5** — Interactive schematic viewer: AI diagram annotation via Claude Vision, pan/zoom canvas with SVG overlays, component hotspots, operating state visualization, layer filtering, diagram comparison
+**Phase 6** — Inference engine: coverage analysis, gap detection, component inference, text analysis, aggregate analysis, document templates for system_analysis and gap_report
 
-**Completed:**
-- `backend/app/services/ai_service.py` — Added `generate_response_stream()` (SSE token streaming via Anthropic streaming API) and `rerank_passages()` (Claude-based re-ranking)
+### Phase 7: Advanced Query + Diagrams (Next)
 
-**Remaining in Batch 1:**
-- `backend/app/services/query_service.py` — Add `create_query_stream()` async generator
-- `backend/app/routers/query.py` — Add `POST /api/query/stream` SSE endpoint with `StreamingResponse`
-- `frontend/src/lib/api-client.ts` — Add `stream()` method for SSE consumption
-- `frontend/src/app/(dashboard)/query/page.tsx` — Switch to streaming with `ReadableStream`
+Per README: Phase 7 (Weeks 17-19) — "Advanced query + diagrams"
 
-### Batch 2 Details (AI Page Classification)
+Known stubs to check:
+- Any advanced query features not yet implemented
+- Diagram-aware querying (query mode "diagram")
+- Enhanced query routing/mode detection
+- Diagram context in query responses
 
-**Files to modify:**
-- `worker/app/pipeline/page_classifier.py` — Full implementation using Claude vision
-- `worker/app/tasks/classify_pages.py` — Full implementation: fetch images, classify, update DB + Qdrant
-- `worker/app/tasks/ingest_manual.py` — Enqueue `classify_pages` after ingestion
-- `worker/app/config.py` — Add `CLASSIFICATION_MODEL`
+### Phase 8: Teaching Mode (After Phase 7)
 
-### Batch 3 Details (Hybrid Retrieval + Re-ranking)
-
-**Files to modify:**
-- `backend/app/services/retrieval_service.py` — Add keyword extraction, score boosting, re-ranking pipeline
-- `backend/app/services/ai_service.py` — `rerank_passages()` already added in Batch 1
-- `backend/app/config.py` — Add `RERANK_ENABLED`, `RERANK_TOP_K`, `RERANK_MODEL`
-- `backend/app/services/query_service.py` — Use `retrieve_with_rerank()` when config enabled
-
-### Batch 4 Details (Ingestion Progress SSE + Page Image Proxy)
-
-**Files to modify:**
-- `worker/app/tasks/ingest_manual.py` — Publish progress to Redis pub/sub
-- `backend/app/routers/manuals.py` — Add `GET /api/manuals/{id}/progress` SSE endpoint + `GET /api/manuals/{id}/pages/{page_number}/image` proxy
-- `frontend/src/app/(dashboard)/manuals/[id]/page.tsx` — Subscribe to progress SSE, show page images
-
-### Batch 5 Details (Query History + UI Polish)
-
-**Files to modify:**
-- `frontend/src/app/(dashboard)/query/page.tsx` — Add query history sidebar
-- `frontend/src/components/query/source-citation.tsx` — Add page image thumbnails
-- `frontend/src/components/query/chat-message.tsx` — Markdown rendering, copy button
-- `frontend/src/app/(dashboard)/manuals/[id]/page.tsx` — Page image display in Pages tab
+Known stubs already scaffolded:
+- `backend/app/services/teaching_service.py` — stub with 6 methods
+- `backend/app/routers/teaching.py` — 12 endpoints all returning 501
+- `backend/app/models/teaching.py` — TeachRequest, AssistRequest, QuizGenerateRequest, etc.
+- `backend/migrations/004_teaching_and_learning.sql` — mechanics, learning_paths, learning_progress, quiz_questions, system_familiarity
+- `worker/app/tasks/generate_learning_path.py` — stub
+- `frontend/src/app/(dashboard)/teach/page.tsx` — UI scaffold
+- `ai_service.py` → `generate_lesson()` raises NotImplementedError("Phase 8")
 
 ### Key Architecture Notes
 
@@ -69,6 +54,25 @@
 - **Storage**: Tigris (S3-compatible via Fly.io)
 - **Auth**: Custom Lucia-style session auth with argon2 + SHA-256
 
-### Previous Phases Completed
-- **Phase 0** (11 batches): Foundation — auth, billing, multi-tenancy, all provider stubs, DB migrations, frontend scaffold
-- **Phase 1** (5 batches): PDF ingestion + basic query — worker pipeline, backend services/routers, frontend manuals + query pages
+### Key Files Modified in Phase 5 + 6
+
+**Phase 5 (8 files, +1,818 lines):**
+- `backend/app/services/ai_service.py` — `analyze_diagram()` with Claude Vision
+- `backend/app/services/viewer_service.py` — full ViewerService (annotate, get, states, list, generate, locate, compare, verify)
+- `backend/app/routers/viewer.py` — 9 endpoints wired up
+- `backend/app/models/viewer.py` — AnnotationResponse, DiagramPageItem, GenerateSchematicResponse, LocateComponentResponse, OperatingState
+- `worker/app/tasks/annotate_diagram.py` — full worker task
+- `frontend/src/app/(dashboard)/viewer/page.tsx` — interactive viewer with pan/zoom, SVG overlays, component hotspots
+- `frontend/src/app/(dashboard)/manuals/[id]/page.tsx` — schematics tab
+- `frontend/src/types/index.ts` — DiagramComponent, DiagramConnection, FlowPath, OperatingState, DiagramPageItem
+
+**Phase 6 (5 files, +1,106 lines):**
+- `backend/app/services/inference_service.py` — full InferenceService (coverage, components, gaps, text, aggregate)
+- `backend/app/routers/analyze.py` — 7 endpoints (diagram, text, aggregate, confidence, coverage, components, gaps)
+- `backend/app/services/document_service.py` — added system_analysis and gap_report templates
+- `frontend/src/app/(dashboard)/manuals/[id]/page.tsx` — Analysis tab with coverage, gap detection, component inference
+- `frontend/src/types/index.ts` — CoverageAnalysis, InferredComponent, GapAnalysis
+
+### Linter Notes
+Files modified by linter (changes are intentional, do not revert):
+- `chat-message.tsx`, `query/page.tsx`, `api-client.ts`, `manuals/[id]/page.tsx`, `types/index.ts`
