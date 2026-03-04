@@ -9,8 +9,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  checks:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: cd frontend && npm ci
+      - run: cd frontend && npx next lint
+      - run: cd frontend && npx tsc --noEmit
+
   deploy-api:
     name: Deploy API
+    needs: [checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +36,7 @@ jobs:
 
   deploy-web:
     name: Deploy Web
+    needs: [checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +47,7 @@ jobs:
 
   deploy-worker:
     name: Deploy Worker
+    needs: [checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +58,7 @@ jobs:
 
   deploy-docgen:
     name: Deploy DocGen
+    needs: [checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -4,6 +4,12 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = 1000;
 
+function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 interface ApiError {
   detail: string;
   status: number;
@@ -44,12 +50,20 @@ class ApiClient {
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
       try {
+        const csrfHeaders: Record<string, string> = {};
+        const method = (options.method || "GET").toUpperCase();
+        if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+          const csrf = getCsrfToken();
+          if (csrf) csrfHeaders["X-CSRF-Token"] = csrf;
+        }
+
         const res = await fetch(url, {
           ...options,
           credentials: "include",
           signal: controller.signal,
           headers: {
             "Content-Type": "application/json",
+            ...csrfHeaders,
             ...options.headers,
           },
         });
@@ -161,11 +175,13 @@ class ApiClient {
     const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5 min for uploads
 
     try {
+      const csrf = getCsrfToken();
       const res = await fetch(url, {
         method: "POST",
         credentials: "include",
         body: formData,
         signal: controller.signal,
+        headers: csrf ? { "X-CSRF-Token": csrf } : undefined,
       });
 
       clearTimeout(timeoutId);
@@ -205,10 +221,14 @@ class ApiClient {
     const timeoutId = setTimeout(() => controller.abort(), 120_000);
 
     try {
+      const streamCsrf = getCsrfToken();
+      const streamHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (streamCsrf) streamHeaders["X-CSRF-Token"] = streamCsrf;
+
       const res = await fetch(url, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: streamHeaders,
         body: JSON.stringify(body),
         signal: controller.signal,
       });

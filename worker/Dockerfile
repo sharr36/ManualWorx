@@ -15,4 +15,8 @@ RUN pip install --no-cache-dir /app/shared/
 COPY worker/ /app/worker/
 RUN pip install --no-cache-dir /app/worker/
 
+RUN useradd -r -s /bin/false appuser
+
+USER appuser
+
 CMD ["arq", "app.main.WorkerSettings"]

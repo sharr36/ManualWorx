@@ -15,6 +15,10 @@ RUN pip install --no-cache-dir /app/shared/
 COPY docgen/ /app/docgen/
 RUN pip install --no-cache-dir /app/docgen/
 
+RUN useradd -r -s /bin/false appuser
+
 EXPOSE 8001
+
+USER appuser
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]

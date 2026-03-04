@@ -12,8 +12,10 @@ from starlette.responses import Response
 from .config import settings
 from .database import create_pool, run_migrations
 from .middleware.auth import AuthMiddleware
+from .middleware.csrf import CSRFMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .routers import (
+    admin,
     analyze,
     auth,
     billing,
@@ -28,7 +30,7 @@ from .routers import (
 )
 from .utils.logging import RequestIDMiddleware, setup_logging
 
-setup_logging(level=getattr(settings, "LOG_LEVEL", "INFO"))
+setup_logging(level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +47,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=()"
+        )
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob: https:; "
+            "connect-src 'self' https://api.stripe.com; "
+            "frame-src https://js.stripe.com; "
+            "font-src 'self' data:; "
+            "object-src 'none'; "
+            "base-uri 'self'"
         )
         if request.url.scheme == "https":
             response.headers["Strict-Transport-Security"] = (
@@ -117,7 +130,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ManualWorx API",
     description="AI-powered manual intelligence platform for heavy equipment mechanics",
-    version="0.9.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -125,6 +138,9 @@ app = FastAPI(
 
 # Rate limiting (innermost — runs after auth sets tenant context)
 app.add_middleware(RateLimitMiddleware)
+
+# CSRF protection (runs after auth, before rate limiting)
+app.add_middleware(CSRFMiddleware)
 
 # Authentication (extracts session, sets request.state)
 app.add_middleware(AuthMiddleware)
@@ -141,7 +157,7 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-CSRF-Token"],
 )
 
 # --- Routers ---
@@ -157,3 +173,4 @@ app.include_router(documents.router)
 app.include_router(teaching.router)
 app.include_router(viewer.router)
 app.include_router(analyze.router)
+app.include_router(admin.router)

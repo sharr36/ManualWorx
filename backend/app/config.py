@@ -1,6 +1,13 @@
 """Application configuration loaded from environment variables."""
 
+import logging
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
+
+_INSECURE_SECRET = "change-me-to-a-random-secret-at-least-32-chars"
 
 
 class Settings(BaseSettings):
@@ -42,10 +49,11 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSION: int = 768
 
     # App
-    SECRET_KEY: str = "change-me-to-a-random-secret-at-least-32-chars"
+    SECRET_KEY: str = _INSECURE_SECRET
     CORS_ORIGINS: str = "http://localhost:3000"
     MAX_PAGES_PER_QUERY: int = 10
     STREAM_RESPONSES: bool = True
+    LOG_LEVEL: str = "INFO"
 
     # Re-ranking
     RERANK_ENABLED: bool = True
@@ -56,6 +64,22 @@ class Settings(BaseSettings):
     # Schematic Viewer
     SYMBOL_LIBRARY_PATH: str = "/app/assets/symbols/"
     ANNOTATION_CACHE_TTL: int = 86400
+
+    @model_validator(mode="after")
+    def _validate_critical_settings(self) -> "Settings":
+        """Warn on missing critical config; fail on insecure SECRET_KEY in production."""
+        warnings: list[str] = []
+        if not self.ANTHROPIC_API_KEY:
+            warnings.append("ANTHROPIC_API_KEY is not set — AI features will fail")
+        if not self.STRIPE_SECRET_KEY:
+            warnings.append("STRIPE_SECRET_KEY is not set — billing will be disabled")
+        if self.SECRET_KEY == _INSECURE_SECRET:
+            warnings.append(
+                "SECRET_KEY is using the insecure default — set a strong random value in production"
+            )
+        for msg in warnings:
+            logger.warning("CONFIG: %s", msg)
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

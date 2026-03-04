@@ -113,7 +113,7 @@ make deploy
 | 7 | 17-19 | Advanced query + diagrams ✅ |
 | 8 | 19-22 | Teaching mode ✅ |
 | 9 | 22-24 | Polish + optimization ✅ |
-| 10 | 24-26 | Launch preparation |
+| 10 | 24-26 | Launch preparation ✅ |
 
 ## Tech Stack
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { BookOpen, FileText, HelpCircle, Users } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -11,9 +12,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { User } from "@/types";
 
+interface TenantStats {
+  total_manuals: number;
+  total_pages: number;
+  queries_30d: number;
+  total_documents: number;
+  active_users_7d: number;
+  total_users: number;
+}
+
 export default function AdminPage() {
   const { user } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
+  const [stats, setStats] = useState<TenantStats | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteName, setInviteName] = useState("");
@@ -22,6 +33,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     api.get<User[]>("/api/users").then(setUsers).catch((e: Error) => toast.error(e.message || "Failed to load users"));
+    api.get<TenantStats>("/api/admin/stats").then(setStats).catch(() => {});
   }, []);
 
   if (!user || (user.role !== "owner" && user.role !== "manager")) {
@@ -76,6 +88,57 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-6">
+      {stats && user.role === "owner" && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="rounded-lg bg-emerald-100 p-2">
+                <BookOpen className="h-5 w-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Manuals</p>
+                <p className="text-2xl font-bold">{stats.total_manuals}</p>
+                <p className="text-xs text-muted-foreground">{stats.total_pages} pages</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="rounded-lg bg-blue-100 p-2">
+                <HelpCircle className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Queries (30d)</p>
+                <p className="text-2xl font-bold">{stats.queries_30d}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="rounded-lg bg-purple-100 p-2">
+                <FileText className="h-5 w-5 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Documents</p>
+                <p className="text-2xl font-bold">{stats.total_documents}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="rounded-lg bg-amber-100 p-2">
+                <Users className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Team</p>
+                <p className="text-2xl font-bold">{stats.total_users}</p>
+                <p className="text-xs text-muted-foreground">{stats.active_users_7d} active this week</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Team Management</h1>
         {user.role === "owner" && (
