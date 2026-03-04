@@ -183,15 +183,61 @@ export interface RefinementSuggestion {
 
 // --- Viewer ---
 
+export interface DiagramComponent {
+  id: string;
+  designator: string;
+  name: string;
+  type: string;
+  bbox_pct: [number, number, number, number];
+  specs: Record<string, string>;
+}
+
+export interface DiagramConnection {
+  from_id: string;
+  to_id: string;
+  line_type: string;
+  label?: string;
+}
+
+export interface FlowPath {
+  line_type: string;
+  path: string[];
+}
+
+export interface OperatingState {
+  id: string;
+  name: string;
+  description: string;
+  active_components: string[];
+  flow_paths: FlowPath[];
+}
+
 export interface DiagramAnnotation {
   id: string;
   page_id: string;
   diagram_type: string;
-  annotation_data: Record<string, unknown>;
+  annotation_data: {
+    components: DiagramComponent[];
+    connections: DiagramConnection[];
+  };
   component_count: number;
   connection_count: number;
-  operating_states: Record<string, unknown>[];
+  operating_states: OperatingState[];
   confidence_overall: number;
+  generated_at?: string;
+  verified?: boolean;
+  cached?: boolean;
+}
+
+export interface DiagramPageItem {
+  page_id: string;
+  manual_id: string;
+  page_number: number;
+  classification: string;
+  manual_title: string;
+  annotated: boolean;
+  component_count: number;
+  confidence: number | null;
 }
 
 // --- Teaching ---

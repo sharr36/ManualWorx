@@ -349,12 +349,72 @@ export default function ManualDetailPage() {
         </TabsContent>
 
         <TabsContent value="schematics" className="mt-6">
-          <ComingSoon
-            icon={BookOpen}
-            feature="Schematic Pages"
-            description="View all hydraulic and electrical schematics detected in this manual."
-            phase={5}
-          />
+          {(() => {
+            const diagramPages = pages.filter(
+              (p) =>
+                p.classification === "hydraulic_schematic" ||
+                p.classification === "electrical_diagram" ||
+                p.classification === "wiring_harness" ||
+                p.classification === "diagnostic_flowchart"
+            );
+            if (diagramPages.length === 0) {
+              return (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No schematics or diagrams detected in this manual.
+                </p>
+              );
+            }
+            return (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {diagramPages.length} schematic/diagram page{diagramPages.length !== 1 ? "s" : ""} detected.
+                  Open in the <a href="/viewer" className="text-emerald-600 underline">Viewer</a> for interactive annotations.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {diagramPages.map((page) => (
+                    <Card key={page.id}>
+                      <CardContent className="p-3">
+                        <button
+                          className="w-full overflow-hidden rounded border bg-slate-100"
+                          onClick={() =>
+                            setExpandedImage(
+                              expandedImage === page.page_number ? null : page.page_number
+                            )
+                          }
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                            alt={`Page ${page.page_number + 1}`}
+                            className="h-40 w-full object-contain"
+                            loading="lazy"
+                          />
+                        </button>
+                        <div className="mt-2 flex items-center gap-2">
+                          <Badge variant="secondary" className="text-[10px]">
+                            p.{page.page_number + 1}
+                          </Badge>
+                          <Badge variant="outline" className="text-[10px]">
+                            {classificationLabels[page.classification] || page.classification}
+                          </Badge>
+                        </div>
+                        {expandedImage === page.page_number && (
+                          <div className="mt-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                              alt={`Page ${page.page_number + 1} full`}
+                              className="max-h-[60vh] w-full rounded border object-contain"
+                            />
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="specs" className="mt-6">

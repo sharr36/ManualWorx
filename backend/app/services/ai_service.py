@@ -325,8 +325,135 @@ Return ONLY a JSON array:
 
         return []
 
-    async def analyze_diagram(self, image_bytes, diagram_type=None):
-        raise NotImplementedError("Phase 5")
+    async def analyze_diagram(
+        self,
+        image_bytes: bytes,
+        page_text: str = "",
+        diagram_type: str | None = None,
+    ) -> dict:
+        """Analyze a diagram image using Claude Vision.
+
+        Extracts components, connections, operating states, and generates
+        structured annotation data for the interactive viewer.
+
+        Returns:
+            {diagram_type, components, connections, operating_states,
+             component_count, connection_count, confidence_overall}
+        """
+        import base64
+
+        image_b64 = base64.standard_b64encode(image_bytes).decode()
+
+        type_hint = f"\nDiagram type hint: {diagram_type}" if diagram_type else ""
+        text_hint = f"\nExtracted text from this page:\n{page_text[:2000]}" if page_text else ""
+
+        prompt = f"""Analyze this technical diagram from a heavy equipment service manual.{type_hint}{text_hint}
+
+Extract the following as JSON:
+
+{{
+  "diagram_type": "hydraulic_schematic" | "electrical" | "wiring",
+  "components": [
+    {{
+      "id": "unique_id",
+      "designator": "component label from diagram (e.g. V1, M2, S3)",
+      "name": "descriptive name",
+      "type": "valve|pump|motor|cylinder|filter|accumulator|gauge|switch|relay|solenoid|sensor|connector|fuse|resistor|other",
+      "bbox_pct": [x_pct, y_pct, width_pct, height_pct],
+      "specs": {{"key": "value"}}
+    }}
+  ],
+  "connections": [
+    {{
+      "from_id": "component_id",
+      "to_id": "component_id",
+      "line_type": "pressure|return|pilot|drain|charge|power_positive|ground_negative|signal_data|can_bus",
+      "label": "optional line label"
+    }}
+  ],
+  "operating_states": [
+    {{
+      "id": "state_id",
+      "name": "state name (e.g. Neutral, Extend, Retract)",
+      "description": "what happens in this state",
+      "active_components": ["component_ids that are active"],
+      "flow_paths": [
+        {{
+          "line_type": "pressure|return|etc",
+          "path": ["component_id_1", "component_id_2", "..."]
+        }}
+      ]
+    }}
+  ],
+  "confidence": 0.0 to 1.0
+}}
+
+Important:
+- bbox_pct coordinates are percentages (0-100) of image width/height
+- Include ALL visible components and connections
+- For hydraulic schematics: identify pressure, return, pilot, and drain lines
+- For electrical: identify power, ground, signal, and CAN bus lines
+- Generate realistic operating states based on the circuit design
+- If uncertain about a component, include it with lower confidence"""
+
+        start = time.monotonic()
+        response = await self.client.messages.create(
+            model=settings.DEFAULT_MODEL,
+            max_tokens=4096,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": image_b64,
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        text = response.content[0].text.strip()
+
+        # Extract JSON from response
+        start_idx = text.find("{")
+        end_idx = text.rfind("}") + 1
+        if start_idx < 0 or end_idx <= start_idx:
+            return {
+                "diagram_type": diagram_type or "hydraulic_schematic",
+                "components": [],
+                "connections": [],
+                "operating_states": [],
+                "component_count": 0,
+                "connection_count": 0,
+                "confidence_overall": 0.0,
+                "model_used": settings.DEFAULT_MODEL,
+                "latency_ms": latency_ms,
+            }
+
+        result = json.loads(text[start_idx:end_idx])
+
+        components = result.get("components", [])
+        connections = result.get("connections", [])
+        states = result.get("operating_states", [])
+
+        return {
+            "diagram_type": result.get("diagram_type", diagram_type or "hydraulic_schematic"),
+            "components": components,
+            "connections": connections,
+            "operating_states": states,
+            "component_count": len(components),
+            "connection_count": len(connections),
+            "confidence_overall": float(result.get("confidence", 0.5)),
+            "model_used": settings.DEFAULT_MODEL,
+            "latency_ms": latency_ms,
+        }
 
     async def generate_lesson(self, system_area, context_pages, depth="standard"):
         raise NotImplementedError("Phase 8")
