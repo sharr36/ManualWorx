@@ -24,6 +24,23 @@ class SourceInfo(BaseModel):
     manual_title: str | None = None
 
 
+class ClaimResponse(BaseModel):
+    id: str
+    claim_text: str
+    claim_type: str
+    safety_critical: bool = False
+    confidence_score: float = 0.0
+    confidence_level: str | None = None
+    sources: list = []
+    corroborated: bool = False
+    contradictions: list = []
+
+
+class RefinementSuggestion(BaseModel):
+    query: str
+    reason: str
+
+
 class QueryResponse(BaseModel):
     id: str
     session_id: str | None = None
@@ -33,6 +50,10 @@ class QueryResponse(BaseModel):
     confidence_score: float | None = None
     confidence_level: str | None = None
     sources: list[SourceInfo] | None = None
+    claims: list[ClaimResponse] | None = None
+    contradiction_count: int = 0
+    safety_claims: int = 0
+    refinements: list[RefinementSuggestion] | None = None
     model_used: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None

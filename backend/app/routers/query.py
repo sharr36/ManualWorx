@@ -6,15 +6,19 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..models.query import (
+    ClaimResponse,
     FollowupRequest,
     QueryListItem,
     QueryRequest,
     QueryResponse,
+    RefinementSuggestion,
 )
+from ..services.confidence_service import ConfidenceService
 from ..services.query_service import QueryService
 
 router = APIRouter(prefix="/api/query", tags=["query"])
 _service = QueryService()
+_confidence = ConfidenceService()
 
 
 @router.post("")
@@ -111,3 +115,15 @@ async def get_query(query_id: UUID, request: Request) -> QueryResponse:
         raise HTTPException(status_code=404, detail="Query not found")
 
     return QueryResponse(**result)
+
+
+@router.get("/{query_id}/claims")
+async def get_query_claims(
+    query_id: UUID, request: Request
+) -> list[ClaimResponse]:
+    """Get per-claim confidence breakdown for a query."""
+    pool = request.app.state.db_pool
+    tenant_id = request.state.tenant_id
+
+    claims = await _confidence.get_claim_breakdown(pool, tenant_id, query_id)
+    return [ClaimResponse(**c) for c in claims]

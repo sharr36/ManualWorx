@@ -166,6 +166,21 @@ export interface ConfidenceScore {
   sources: string[];
 }
 
+export interface Claim {
+  claim_text: string;
+  claim_type: "spec" | "description" | "procedure_step" | "warning";
+  safety_critical: boolean;
+  source_pages: number[];
+  confidence: number;
+  corroborated: boolean;
+  contradictions: string[];
+}
+
+export interface RefinementSuggestion {
+  query: string;
+  reason: string;
+}
+
 // --- Viewer ---
 
 export interface DiagramAnnotation {

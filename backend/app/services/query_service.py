@@ -11,6 +11,7 @@ import asyncpg
 from ..config import settings
 from ..database import set_tenant_context
 from .ai_service import AIService
+from .confidence_service import ConfidenceService
 from .retrieval_service import RetrievalService
 
 
@@ -20,6 +21,7 @@ class QueryService:
     def __init__(self):
         self.retrieval = RetrievalService()
         self.ai = AIService()
+        self.confidence = ConfidenceService()
 
     async def create_query(
         self,
@@ -102,7 +104,43 @@ class QueryService:
                 total_latency,
             )
 
-        # 5. Increment usage counter
+        # 5. Per-claim confidence scoring (async, non-blocking)
+        claim_result = None
+        try:
+            claim_result = await self.confidence.score_response(
+                pool=pool,
+                tenant_id=tenant_id,
+                query_id=query_id,
+                response_text=ai_result["response_text"],
+                sources=ai_result["sources"],
+                context_chunks=chunks,
+            )
+        except Exception:
+            pass  # Claim scoring is non-critical
+
+        # Use aggregated claim confidence if available
+        final_confidence = ai_result["confidence_score"]
+        final_level = ai_result["confidence_level"]
+        if claim_result and claim_result.get("claims"):
+            final_confidence = claim_result["overall_confidence"]
+            # Re-derive level from aggregated score
+            final_level = self.ai._get_confidence_level(final_confidence)
+
+        # 6. Query refinement suggestions (when confidence is low)
+        refinements = []
+        claims_list = claim_result.get("claims", []) if claim_result else []
+        if final_confidence < 0.8 or (claim_result and claim_result.get("contradiction_count", 0) > 0):
+            try:
+                refinements = await self.ai.suggest_refinements(
+                    query_text=query_text,
+                    response_text=ai_result["response_text"],
+                    confidence_score=final_confidence,
+                    claims=claims_list,
+                )
+            except Exception:
+                pass
+
+        # 7. Increment usage counter
         if redis:
             month_key = datetime.now().strftime("%Y-%m")
             usage_key = f"usage:{tenant_id}:{month_key}:queries"
@@ -118,9 +156,13 @@ class QueryService:
             "query_text": query_text,
             "query_mode": query_mode,
             "response_text": ai_result["response_text"],
-            "confidence_score": ai_result["confidence_score"],
-            "confidence_level": ai_result["confidence_level"],
+            "confidence_score": final_confidence,
+            "confidence_level": final_level,
             "sources": ai_result["sources"],
+            "claims": claims_list,
+            "contradiction_count": claim_result.get("contradiction_count", 0) if claim_result else 0,
+            "safety_claims": claim_result.get("safety_claims", 0) if claim_result else 0,
+            "refinements": refinements,
             "model_used": ai_result["model_used"],
             "input_tokens": ai_result["input_tokens"],
             "output_tokens": ai_result["output_tokens"],
@@ -220,7 +262,33 @@ class QueryService:
         except Exception:
             pass  # Don't fail the stream if DB write fails
 
-        # 4. Increment usage counter
+        # 4. Per-claim scoring + refinement suggestions (post-stream)
+        try:
+            claim_result = await self.confidence.score_response(
+                pool=pool,
+                tenant_id=tenant_id,
+                query_id=query_id,
+                response_text=done_data.get("response_text", ""),
+                sources=done_data.get("sources", []),
+                context_chunks=chunks,
+            )
+            claims = claim_result.get("claims", [])
+
+            refinements = []
+            overall = claim_result.get("overall_confidence", 1.0)
+            if overall < 0.8 or claim_result.get("contradiction_count", 0) > 0:
+                refinements = await self.ai.suggest_refinements(
+                    query_text=query_text,
+                    response_text=done_data.get("response_text", ""),
+                    confidence_score=overall,
+                    claims=claims,
+                )
+
+            yield f"data: {json.dumps({'type': 'claims', 'claims': claims, 'overall_confidence': overall, 'contradiction_count': claim_result.get('contradiction_count', 0), 'safety_claims': claim_result.get('safety_claims', 0), 'refinements': refinements})}\n\n"
+        except Exception:
+            pass
+
+        # 5. Increment usage counter
         if redis:
             month_key = datetime.now().strftime("%Y-%m")
             usage_key = f"usage:{tenant_id}:{month_key}:queries"

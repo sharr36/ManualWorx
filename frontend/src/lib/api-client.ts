@@ -98,7 +98,8 @@ class ApiClient {
     body: unknown,
     onToken: (text: string) => void,
     onDone: (data: Record<string, unknown>) => void,
-    onError?: (error: string) => void
+    onError?: (error: string) => void,
+    onClaims?: (data: Record<string, unknown>) => void
   ): Promise<void> {
     const url = `${this.baseUrl}${path}`;
 
@@ -142,6 +143,8 @@ class ApiClient {
             onToken(data.text);
           } else if (data.type === "done") {
             onDone(data);
+          } else if (data.type === "claims") {
+            onClaims?.(data);
           }
         } catch {
           // skip malformed events

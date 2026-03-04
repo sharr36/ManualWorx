@@ -1,14 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock, MessageSquare, Send } from "lucide-react";
+import {
+  AlertTriangle,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare,
+  Send,
+  Shield,
+  Sparkles,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatMessage } from "@/components/query/chat-message";
 import { SourceCitation } from "@/components/query/source-citation";
 import { api } from "@/lib/api-client";
-import type { Manual, ConfidenceLevel } from "@/types";
+import type { Manual, ConfidenceLevel, Claim, RefinementSuggestion } from "@/types";
 
 interface Message {
   id: string;
@@ -18,6 +27,10 @@ interface Message {
   confidenceLevel?: ConfidenceLevel;
   sources?: Source[];
   latency_ms?: number;
+  claims?: Claim[];
+  contradictionCount?: number;
+  safetyClaims?: number;
+  refinements?: RefinementSuggestion[];
 }
 
 interface Source {
@@ -50,6 +63,150 @@ const MODE_MAP: Record<string, string> = {
   Troubleshoot: "troubleshoot",
 };
 
+const CLAIM_TYPE_COLORS: Record<string, string> = {
+  spec: "bg-blue-100 text-blue-800",
+  description: "bg-slate-100 text-slate-700",
+  procedure_step: "bg-emerald-100 text-emerald-800",
+  warning: "bg-amber-100 text-amber-800",
+};
+
+function ClaimBreakdown({
+  claims,
+  contradictionCount,
+  safetyClaims,
+}: {
+  claims: Claim[];
+  contradictionCount: number;
+  safetyClaims: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (claims.length === 0) return null;
+
+  const avgConfidence = Math.round(
+    (claims.reduce((s, c) => s + c.confidence, 0) / claims.length) * 100
+  );
+
+  return (
+    <div className="mt-2 rounded-lg border bg-slate-50 p-3">
+      <button
+        className="flex w-full items-center justify-between text-xs"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="font-medium">
+          {claims.length} claims analyzed &middot; {avgConfidence}% avg
+          confidence
+          {safetyClaims > 0 && (
+            <span className="ml-2 inline-flex items-center gap-0.5 text-amber-600">
+              <Shield className="h-3 w-3" />
+              {safetyClaims} safety-critical
+            </span>
+          )}
+          {contradictionCount > 0 && (
+            <span className="ml-2 inline-flex items-center gap-0.5 text-red-600">
+              <AlertTriangle className="h-3 w-3" />
+              {contradictionCount} contradictions
+            </span>
+          )}
+        </span>
+        {expanded ? (
+          <ChevronUp className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-1.5">
+          {claims.map((claim, i) => (
+            <div
+              key={i}
+              className="flex items-start gap-2 rounded border bg-white p-2 text-xs"
+            >
+              {/* Confidence dot */}
+              <div
+                className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${
+                  claim.confidence >= 0.8
+                    ? "bg-emerald-500"
+                    : claim.confidence >= 0.6
+                      ? "bg-amber-500"
+                      : "bg-red-500"
+                }`}
+                title={`${Math.round(claim.confidence * 100)}%`}
+              />
+              <div className="flex-1">
+                <p>{claim.claim_text}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  <span
+                    className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+                      CLAIM_TYPE_COLORS[claim.claim_type] || CLAIM_TYPE_COLORS.description
+                    }`}
+                  >
+                    {claim.claim_type.replace("_", " ")}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {Math.round(claim.confidence * 100)}%
+                  </span>
+                  {claim.safety_critical && (
+                    <Shield className="h-3 w-3 text-amber-500" />
+                  )}
+                  {claim.corroborated && (
+                    <span className="text-[10px] text-emerald-600">
+                      corroborated
+                    </span>
+                  )}
+                  {claim.source_pages.length > 0 && (
+                    <span className="text-[10px] text-muted-foreground">
+                      p.{claim.source_pages.join(", p.")}
+                    </span>
+                  )}
+                </div>
+                {claim.contradictions.length > 0 && (
+                  <div className="mt-1 rounded bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700">
+                    <AlertTriangle className="mr-0.5 inline h-2.5 w-2.5" />
+                    {claim.contradictions[0]}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RefinementChips({
+  refinements,
+  onSelect,
+}: {
+  refinements: RefinementSuggestion[];
+  onSelect: (query: string) => void;
+}) {
+  if (refinements.length === 0) return null;
+
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+      <p className="mb-2 flex items-center gap-1 text-xs font-medium text-emerald-800">
+        <Sparkles className="h-3 w-3" />
+        Try a more specific query:
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {refinements.map((r, i) => (
+          <button
+            key={i}
+            className="rounded-full border border-emerald-300 bg-white px-2.5 py-1 text-xs text-emerald-800 transition hover:bg-emerald-100"
+            onClick={() => onSelect(r.query)}
+            title={r.reason}
+          >
+            {r.query}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function QueryPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -72,7 +229,6 @@ export default function QueryPage() {
       })
       .catch(() => {});
 
-    // Load query history
     api
       .get<HistoryItem[]>("/api/query/history?limit=30")
       .then(setHistory)
@@ -83,33 +239,30 @@ export default function QueryPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const loadHistoryQuery = useCallback(
-    async (queryId: string) => {
-      try {
-        const result = await api.get<{
-          query_text: string;
-          response_text: string;
-          sources?: Source[];
-        }>(`/api/query/${queryId}`);
-        setMessages([
-          {
-            id: `user-${queryId}`,
-            role: "user",
-            content: result.query_text,
-          },
-          {
-            id: queryId,
-            role: "assistant",
-            content: result.response_text,
-            sources: result.sources,
-          },
-        ]);
-        setLastSources(result.sources || []);
-        setShowHistory(false);
-      } catch {}
-    },
-    []
-  );
+  const loadHistoryQuery = useCallback(async (queryId: string) => {
+    try {
+      const result = await api.get<{
+        query_text: string;
+        response_text: string;
+        sources?: Source[];
+      }>(`/api/query/${queryId}`);
+      setMessages([
+        {
+          id: `user-${queryId}`,
+          role: "user",
+          content: result.query_text,
+        },
+        {
+          id: queryId,
+          role: "assistant",
+          content: result.response_text,
+          sources: result.sources,
+        },
+      ]);
+      setLastSources(result.sources || []);
+      setShowHistory(false);
+    } catch {}
+  }, []);
 
   const submitQuery = useCallback(
     async (queryText: string) => {
@@ -135,6 +288,7 @@ export default function QueryPage() {
         await api.stream(
           "/api/query/stream",
           { query_text: queryText.trim(), query_mode: mode, manual_ids },
+          // onToken
           (text) => {
             setMessages((prev) =>
               prev.map((m) =>
@@ -144,6 +298,7 @@ export default function QueryPage() {
               )
             );
           },
+          // onDone
           (data) => {
             setMessages((prev) =>
               prev.map((m) =>
@@ -163,17 +318,43 @@ export default function QueryPage() {
               )
             );
             setLastSources((data.sources as Source[]) || []);
-            // Refresh history after successful query
             api
               .get<HistoryItem[]>("/api/query/history?limit=30")
               .then(setHistory)
               .catch(() => {});
           },
+          // onError
           (error) => {
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
                   ? { ...m, content: `Error: ${error}` }
+                  : m
+              )
+            );
+          },
+          // onClaims
+          (data) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? {
+                      ...m,
+                      claims: data.claims as Claim[] | undefined,
+                      contradictionCount: data.contradiction_count as
+                        | number
+                        | undefined,
+                      safetyClaims: data.safety_claims as number | undefined,
+                      refinements: data.refinements as
+                        | RefinementSuggestion[]
+                        | undefined,
+                      // Update confidence to claim-based aggregate if available
+                      confidence: data.overall_confidence
+                        ? Math.round(
+                            (data.overall_confidence as number) * 100
+                          )
+                        : m.confidence,
+                    }
                   : m
               )
             );
@@ -248,7 +429,9 @@ export default function QueryPage() {
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">No previous queries.</p>
+            <p className="text-xs text-muted-foreground">
+              No previous queries.
+            </p>
           )}
         </div>
       )}
@@ -282,17 +465,42 @@ export default function QueryPage() {
           )}
 
           {messages.map((msg) => (
-            <ChatMessage
-              key={msg.id}
-              role={msg.role}
-              content={msg.content}
-              confidence={msg.confidence}
-              confidenceLevel={msg.confidenceLevel}
-              latency_ms={msg.latency_ms}
-              sources={msg.sources?.map(
-                (s) => `p.${s.page_number + 1} (${s.classification})`
+            <div key={msg.id}>
+              <ChatMessage
+                role={msg.role}
+                content={msg.content}
+                confidence={msg.confidence}
+                confidenceLevel={msg.confidenceLevel}
+                latency_ms={msg.latency_ms}
+                sources={msg.sources?.map(
+                  (s) => `p.${s.page_number + 1} (${s.classification})`
+                )}
+              />
+              {/* Claim breakdown below assistant messages */}
+              {msg.role === "assistant" && msg.claims && msg.claims.length > 0 && (
+                <div className="ml-0 max-w-[80%]">
+                  <ClaimBreakdown
+                    claims={msg.claims}
+                    contradictionCount={msg.contradictionCount || 0}
+                    safetyClaims={msg.safetyClaims || 0}
+                  />
+                </div>
               )}
-            />
+              {/* Refinement suggestions */}
+              {msg.role === "assistant" &&
+                msg.refinements &&
+                msg.refinements.length > 0 && (
+                  <div className="ml-0 max-w-[80%]">
+                    <RefinementChips
+                      refinements={msg.refinements}
+                      onSelect={(q) => {
+                        setInput(q);
+                        textareaRef.current?.focus();
+                      }}
+                    />
+                  </div>
+                )}
+            </div>
           ))}
 
           {loading && messages[messages.length - 1]?.content === "" && (
@@ -391,7 +599,10 @@ export default function QueryPage() {
               Sources
             </h4>
             {lastSources.length > 0 ? (
-              <div className="space-y-2 overflow-y-auto" style={{ maxHeight: "50vh" }}>
+              <div
+                className="space-y-2 overflow-y-auto"
+                style={{ maxHeight: "50vh" }}
+              >
                 {lastSources.map((source) => (
                   <SourceCitation
                     key={source.page_id}

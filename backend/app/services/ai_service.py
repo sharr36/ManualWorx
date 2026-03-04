@@ -270,6 +270,61 @@ Return format: [0.8, 0.3, 0.95, ...]"""
         passages.sort(key=lambda x: x.get("score", 0), reverse=True)
         return passages
 
+    async def suggest_refinements(
+        self,
+        query_text: str,
+        response_text: str,
+        confidence_score: float,
+        claims: list[dict],
+    ) -> list[dict]:
+        """Suggest query refinements when confidence is low.
+
+        Returns a list of refinement suggestions with rationale.
+        """
+        if confidence_score >= 0.8 and not any(
+            c.get("contradictions") for c in claims
+        ):
+            return []
+
+        low_claims = [
+            c for c in claims
+            if c.get("confidence", 1.0) < 0.6 or c.get("contradictions")
+        ]
+
+        prompt = f"""A mechanic asked: "{query_text}"
+
+The AI response had {len(claims)} claims. Overall confidence: {confidence_score:.0%}.
+{len(low_claims)} claims had low confidence or contradictions.
+
+Low-confidence claims:
+{json.dumps([{"text": c["claim_text"], "confidence": c["confidence"], "type": c["claim_type"]} for c in low_claims[:5]], indent=2)}
+
+Suggest 2-3 refined queries that would get more specific, higher-confidence answers.
+Focus on: narrowing scope, specifying exact components, asking for specific spec types.
+
+Return ONLY a JSON array:
+[{{"query": "refined question text", "reason": "why this would help"}}]"""
+
+        try:
+            response = await self.client.messages.create(
+                model=getattr(settings, "RERANK_MODEL", "claude-haiku-4-5-20251001"),
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            start = text.find("[")
+            end = text.rfind("]") + 1
+            if start >= 0 and end > start:
+                suggestions = json.loads(text[start:end])
+                return [
+                    {"query": s.get("query", ""), "reason": s.get("reason", "")}
+                    for s in suggestions[:3]
+                ]
+        except Exception:
+            pass
+
+        return []
+
     async def analyze_diagram(self, image_bytes, diagram_type=None):
         raise NotImplementedError("Phase 5")
 
