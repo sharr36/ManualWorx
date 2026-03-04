@@ -61,15 +61,18 @@ build-docker: ## Build all Docker images
 
 # --- Fly.io Deployment ---
 deploy-api: ## Deploy backend to Fly.io
-	cd backend && flyctl deploy
+	cp -r shared backend/_shared
+	cd backend && flyctl deploy; rm -rf _shared
 
 deploy-web: ## Deploy frontend to Fly.io
 	cd frontend && flyctl deploy
 
 deploy-worker: ## Deploy worker to Fly.io
-	cd worker && flyctl deploy
+	cp -r shared worker/_shared
+	cd worker && flyctl deploy; rm -rf _shared
 
 deploy-docgen: ## Deploy docgen to Fly.io
-	cd docgen && flyctl deploy
+	cp -r shared docgen/_shared
+	cd docgen && flyctl deploy; rm -rf _shared
 
 deploy-all: deploy-api deploy-web deploy-worker deploy-docgen ## Deploy all services

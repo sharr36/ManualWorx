@@ -8,12 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install shared package
-COPY shared/ /shared/
+COPY _shared/ /shared/
 RUN pip install --no-cache-dir /shared/ && rm -rf /shared/
 
 # Install backend deps explicitly (shared already installed above;
 # file:// reference in pyproject.toml only works for local dev)
-COPY backend/pyproject.toml /app/
+COPY pyproject.toml /app/
 RUN pip install --no-cache-dir \
     "fastapi>=0.115.0" "uvicorn[standard]>=0.30.0" "asyncpg>=0.29.0" \
     "pydantic>=2.0" "pydantic-settings>=2.0" "email-validator>=2.0.0" "argon2-cffi>=23.1.0" \
@@ -22,8 +22,8 @@ RUN pip install --no-cache-dir \
     "arq>=0.26.0" "PyMuPDF>=1.24.0" "Jinja2>=3.1.0" "redis>=5.0.0"
 
 # Copy application code
-COPY backend/app/ /app/app/
-COPY backend/migrations/ /app/migrations/
+COPY app/ /app/app/
+COPY migrations/ /app/migrations/
 
 RUN useradd -r -s /bin/false appuser
 

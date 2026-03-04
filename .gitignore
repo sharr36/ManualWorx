@@ -57,3 +57,6 @@ docgen/app/output/
 tmp/
 temp/
 *.tmp
+
+# Deploy-time shared package copy
+_shared/

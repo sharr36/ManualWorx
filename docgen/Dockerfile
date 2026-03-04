@@ -10,7 +10,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install shared package
-COPY shared/ /app/shared/
+COPY _shared/ /app/shared/
 RUN pip install --no-cache-dir /app/shared/ && rm -rf /app/shared/
 
 # Install docgen deps explicitly (shared already installed above;
@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir \
     "python-docx>=1.1" "Jinja2>=3.1" "httpx>=0.27"
 
 # Copy docgen application code
-COPY docgen/ /app/docgen/
+COPY app/ /app/app/
 
 RUN useradd -r -s /bin/false appuser
 

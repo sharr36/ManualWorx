@@ -8,7 +8,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install shared package
-COPY shared/ /app/shared/
+COPY _shared/ /app/shared/
 RUN pip install --no-cache-dir /app/shared/ && rm -rf /app/shared/
 
 # Install worker deps explicitly (shared already installed above;
@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir \
     "pydantic-settings>=2.0"
 
 # Copy worker application code
-COPY worker/ /app/worker/
+COPY app/ /app/app/
 
 RUN useradd -r -s /bin/false appuser
 
