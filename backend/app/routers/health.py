@@ -5,6 +5,12 @@ from fastapi import APIRouter, Request
 router = APIRouter(tags=["health"])
 
 
+@router.get("/api/livez")
+async def liveness() -> dict:
+    """Lightweight liveness probe — no backing-service checks."""
+    return {"status": "ok"}
+
+
 @router.get("/api/health")
 async def health_check(request: Request) -> dict:
     """Check connectivity to all backing services."""

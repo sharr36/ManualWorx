@@ -73,7 +73,15 @@ async def lifespan(app: FastAPI):
     logger.info("Starting ManualWorx API...")
 
     # Database
-    app.state.db_pool = await create_pool()
+    try:
+        app.state.db_pool = await create_pool()
+    except Exception as e:
+        logger.critical(
+            "Failed to connect to database: %s. "
+            "Ensure DATABASE_URL is set (e.g. via `flyctl secrets set DATABASE_URL=...`)",
+            e,
+        )
+        raise
     logger.info("Database pool created")
 
     # Run migrations

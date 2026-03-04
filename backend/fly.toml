@@ -17,10 +17,10 @@ primary_region = "ord"
     soft_limit = 200
 
 [[http_service.checks]]
-  grace_period = "10s"
+  grace_period = "30s"
   interval = "30s"
   method = "GET"
-  path = "/api/health"
+  path = "/api/livez"
   timeout = "5s"
 
 [[vm]]
