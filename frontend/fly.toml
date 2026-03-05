@@ -3,6 +3,8 @@ primary_region = "ord"
 
 [build]
   dockerfile = "Dockerfile"
+  [build.args]
+    NEXT_PUBLIC_API_URL = "https://manualworx-api.fly.dev"
 
 [http_service]
   internal_port = 3000
