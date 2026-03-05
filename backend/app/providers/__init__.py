@@ -1,15 +1,86 @@
 """Provider factory functions — abstracted external dependencies."""
 
+import logging
+
 from ..config import settings
+from .ocr.base import OCRProvider
+
+logger = logging.getLogger(__name__)
 
 
-def get_ocr_provider():
-    """Get the configured OCR provider."""
-    if settings.AZURE_DI_ENDPOINT and settings.AZURE_DI_KEY:
-        from .ocr.azure_di import AzureDIProvider
-        return AzureDIProvider(settings.AZURE_DI_ENDPOINT, settings.AZURE_DI_KEY)
-    from .ocr.pymupdf import PyMuPDFProvider
-    return PyMuPDFProvider()
+def _build_ocr_provider(name: str) -> OCRProvider:
+    """Instantiate a single OCR provider by name."""
+    if name == "tesseract":
+        from .ocr.tesseract import TesseractProvider
+        return TesseractProvider()
+    elif name == "claude_vision":
+        from .ocr.claude_vision import ClaudeVisionProvider
+        return ClaudeVisionProvider(
+            api_key=settings.ANTHROPIC_API_KEY,
+            model=settings.CLAUDE_VISION_MODEL,
+        )
+    elif name == "unstructured":
+        from .ocr.unstructured import UnstructuredProvider
+        return UnstructuredProvider(
+            api_url=settings.UNSTRUCTURED_API_URL,
+            api_key=settings.UNSTRUCTURED_API_KEY,
+        )
+    elif name == "reducto":
+        from .ocr.reducto import ReductoProvider
+        return ReductoProvider(api_key=settings.REDUCTO_API_KEY)
+    elif name == "pymupdf":
+        from .ocr.pymupdf import PyMuPDFProvider
+        return PyMuPDFProvider()
+    else:
+        logger.warning("Unknown OCR provider %r, falling back to pymupdf", name)
+        from .ocr.pymupdf import PyMuPDFProvider
+        return PyMuPDFProvider()
+
+
+def get_ocr_provider() -> "FallbackOCRProvider":
+    """Get the configured OCR provider with fallback support."""
+    primary = _build_ocr_provider(settings.OCR_PROVIDER)
+    fallback = None
+    if settings.OCR_FALLBACK_PROVIDER and settings.OCR_FALLBACK_PROVIDER != settings.OCR_PROVIDER:
+        fallback = _build_ocr_provider(settings.OCR_FALLBACK_PROVIDER)
+    return FallbackOCRProvider(
+        primary=primary,
+        fallback=fallback,
+        threshold=settings.OCR_FALLBACK_THRESHOLD,
+    )
+
+
+class FallbackOCRProvider(OCRProvider):
+    """Wraps a primary provider and falls back to a secondary when confidence is low."""
+
+    def __init__(
+        self,
+        primary: OCRProvider,
+        fallback: OCRProvider | None,
+        threshold: float = 0.5,
+    ):
+        self.primary = primary
+        self.fallback = fallback
+        self.threshold = threshold
+
+    async def extract_text(self, pdf_bytes: bytes, page_number: int):
+        result = await self.primary.extract_text(pdf_bytes, page_number)
+        if result.confidence >= self.threshold or not self.fallback:
+            return result
+        logger.info(
+            "Primary OCR confidence %.2f < %.2f for page %d, trying fallback",
+            result.confidence, self.threshold, page_number,
+        )
+        return await self.fallback.extract_text(pdf_bytes, page_number)
+
+    async def extract_tables(self, pdf_bytes: bytes, page_number: int):
+        tables = await self.primary.extract_tables(pdf_bytes, page_number)
+        if tables or not self.fallback:
+            return tables
+        return await self.fallback.extract_tables(pdf_bytes, page_number)
+
+    async def analyze_layout(self, pdf_bytes: bytes, page_number: int):
+        return await self.primary.analyze_layout(pdf_bytes, page_number)
 
 
 def get_embedding_provider():

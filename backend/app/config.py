@@ -35,9 +35,16 @@ class Settings(BaseSettings):
     STRIPE_PRICE_SHOP_BASE_MONTHLY: str = ""
     STRIPE_PRICE_SHOP_PER_USER_MONTHLY: str = ""
 
-    # OCR (optional)
+    # OCR
+    OCR_PROVIDER: str = "tesseract"  # tesseract | claude_vision | unstructured | reducto | pymupdf
+    OCR_FALLBACK_PROVIDER: str = "claude_vision"  # fallback when primary returns low confidence
+    OCR_FALLBACK_THRESHOLD: float = 0.5  # confidence below this triggers fallback
     AZURE_DI_ENDPOINT: str = ""
     AZURE_DI_KEY: str = ""
+    UNSTRUCTURED_API_URL: str = ""  # e.g. http://manualworx-unstructured.flycast:8000
+    UNSTRUCTURED_API_KEY: str = ""
+    REDUCTO_API_KEY: str = ""
+    CLAUDE_VISION_MODEL: str = "claude-haiku-4-5-20251001"  # model for vision OCR
 
     # Embeddings
     EMBEDDING_PROVIDER: str = "together"
