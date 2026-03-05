@@ -13,8 +13,8 @@ CREATE INDEX IF NOT EXISTS idx_system_familiarity_mechanic ON system_familiarity
 -- Documentation coverage lookups by manual (analysis page)
 CREATE INDEX IF NOT EXISTS idx_documentation_coverage_manual ON documentation_coverage(manual_id);
 
--- Sessions cleanup: expired sessions (auth middleware hot path)
-CREATE INDEX IF NOT EXISTS idx_sessions_expires_active ON sessions(expires_at) WHERE expires_at > NOW();
+-- Sessions by expiry (auth middleware hot path — used to find/prune expired sessions)
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
 -- Chunks vector_id lookups (retrieval service reverse-mapping)
 CREATE INDEX IF NOT EXISTS idx_chunks_vector_id ON chunks(vector_id) WHERE vector_id IS NOT NULL;
