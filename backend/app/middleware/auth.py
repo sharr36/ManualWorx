@@ -12,6 +12,7 @@ from ..utils.security import hash_token
 # Paths that don't require authentication
 PUBLIC_PATHS = {
     "/api/health",
+    "/api/livez",
     "/api/auth/signup",
     "/api/auth/login",
     "/api/webhooks/stripe",
