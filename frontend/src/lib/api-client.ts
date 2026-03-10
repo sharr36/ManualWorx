@@ -164,7 +164,8 @@ class ApiClient {
   async uploadFile<T>(
     path: string,
     file: File,
-    metadata: Record<string, string> = {}
+    metadata: Record<string, string> = {},
+    onProgress?: (percent: number) => void
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const formData = new FormData();
@@ -175,40 +176,55 @@ class ApiClient {
       }
     }
 
-    // Upload: longer timeout, no retries (large body)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5 min for uploads
+    const csrf = getCsrfToken();
 
-    try {
-      const csrf = getCsrfToken();
-      const res = await fetch(url, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-        signal: controller.signal,
-        headers: csrf ? { "X-CSRF-Token": csrf } : undefined,
+    // Use XMLHttpRequest for upload progress tracking
+    return new Promise<T>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url);
+      xhr.withCredentials = true;
+      xhr.timeout = 300_000; // 5 min
+
+      if (csrf) xhr.setRequestHeader("X-CSRF-Token", csrf);
+
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
       });
 
-      clearTimeout(timeoutId);
+      xhr.addEventListener("load", () => {
+        if (xhr.status === 401) {
+          if (typeof window !== "undefined") window.location.href = "/login";
+          reject(createApiError("Session expired", 401));
+          return;
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          let detail = "Upload failed";
+          try {
+            const body = JSON.parse(xhr.responseText);
+            detail = body.detail || detail;
+          } catch {}
+          reject(createApiError(detail, xhr.status));
+          return;
+        }
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(createApiError("Invalid response", xhr.status));
+        }
+      });
 
-      if (res.status === 401) {
-        if (typeof window !== "undefined") window.location.href = "/login";
-        throw createApiError("Session expired", 401);
-      }
+      xhr.addEventListener("error", () => {
+        reject(createApiError("Network error during upload", 0));
+      });
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: "Upload failed" }));
-        throw createApiError(body.detail || "Upload failed", res.status);
-      }
+      xhr.addEventListener("timeout", () => {
+        reject(createApiError("Upload timed out", 0));
+      });
 
-      return res.json();
-    } catch (e) {
-      clearTimeout(timeoutId);
-      if (e instanceof DOMException && e.name === "AbortError") {
-        throw createApiError("Upload timed out", 0);
-      }
-      throw e;
-    }
+      xhr.send(formData);
+    });
   }
 
   async stream(

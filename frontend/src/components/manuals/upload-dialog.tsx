@@ -13,6 +13,17 @@ import type { Manual } from "@/types";
 const MAX_FILE_SIZE_MB = 100;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+const STAGE_LABELS: Record<string, string> = {
+  uploading: "Uploading file…",
+  processing: "Starting processing…",
+  downloading: "Preparing PDF…",
+  ocr: "Extracting text…",
+  chunking: "Chunking pages…",
+  embedding: "Generating embeddings…",
+  ready: "Complete!",
+  failed: "Processing failed",
+};
+
 interface UploadDialogProps {
   open: boolean;
   onClose: () => void;
@@ -28,7 +39,10 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [stage, setStage] = useState("uploading");
   const inputRef = useRef<HTMLInputElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const reset = useCallback(() => {
     setFile(null);
@@ -38,6 +52,12 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     setManualType("service");
     setError("");
     setUploading(false);
+    setProgress(0);
+    setStage("uploading");
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
   }, []);
 
   const handleClose = useCallback(() => {
@@ -80,27 +100,92 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     [title]
   );
 
+  const subscribeToProgress = useCallback(
+    (manualId: string, onDone: () => void) => {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+      const es = new EventSource(
+        `${apiBase}/api/manuals/${manualId}/progress`,
+        { withCredentials: true }
+      );
+      eventSourceRef.current = es;
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const { stage: s, page, total } = data;
+
+          setStage(s);
+
+          if (s === "ocr" && total > 0) {
+            // Upload = 0-50%, OCR = 50-85%
+            setProgress(50 + Math.round((page / total) * 35));
+          } else if (s === "chunking") {
+            setProgress(85);
+          } else if (s === "embedding") {
+            setProgress(92);
+          } else if (s === "ready") {
+            setProgress(100);
+            es.close();
+            onDone();
+          } else if (s === "failed") {
+            es.close();
+            setError("Processing failed — please try again");
+            setUploading(false);
+          }
+        } catch {
+          // skip malformed events
+        }
+      };
+
+      es.onerror = () => {
+        // SSE connection lost — don't block the user, just close
+        es.close();
+        onDone();
+      };
+    },
+    []
+  );
+
   const handleSubmit = useCallback(async () => {
     if (!file || !title.trim()) return;
 
     setUploading(true);
     setError("");
+    setProgress(0);
+    setStage("uploading");
 
     try {
-      const result = await api.uploadFile<Manual>("/api/manuals/upload", file, {
-        title: title.trim(),
-        make: make.trim() || "",
-        model: model.trim() || "",
-        manual_type: manualType,
+      const result = await api.uploadFile<Manual>(
+        "/api/manuals/upload",
+        file,
+        {
+          title: title.trim(),
+          make: make.trim() || "",
+          model: model.trim() || "",
+          manual_type: manualType,
+        },
+        (pct) => {
+          // Upload transfer is 0-50% of the overall bar
+          setProgress(Math.round(pct * 0.5));
+        }
+      );
+
+      // Upload done — now track processing via SSE
+      setProgress(50);
+      setStage("processing");
+
+      subscribeToProgress(result.id, () => {
+        toast.success("Manual uploaded and processed");
+        const manual = result;
+        reset();
+        onSuccess(manual);
       });
-      toast.success("Manual uploaded — processing started");
-      reset();
-      onSuccess(result);
     } catch (err: any) {
       setError(err.detail || err.message || "Upload failed");
       setUploading(false);
+      setProgress(0);
     }
-  }, [file, title, make, model, manualType, reset, onSuccess]);
+  }, [file, title, make, model, manualType, reset, onSuccess, subscribeToProgress]);
 
   if (!open) return null;
 
@@ -222,9 +307,10 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
 
           {uploading && (
             <div className="space-y-1">
-              <Progress value={undefined} className="h-2" />
+              <Progress value={progress} className="h-2" />
               <p className="text-center text-xs text-muted-foreground">
-                Uploading...
+                {STAGE_LABELS[stage] || "Processing…"}
+                {stage === "uploading" && progress > 0 && ` ${progress * 2}%`}
               </p>
             </div>
           )}
