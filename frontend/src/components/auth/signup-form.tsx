@@ -44,7 +44,7 @@ export function SignupForm() {
         tenant_name: tenantName || name,
         tenant_type: tenantType,
       });
-      router.push("/");
+      router.push("/dashboard");
     } catch (err: unknown) {
       const apiError = err as { detail?: string };
       setError(apiError.detail || "Signup failed. Please try again.");

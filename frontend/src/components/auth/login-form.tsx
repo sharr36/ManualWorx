@@ -23,7 +23,7 @@ export function LoginForm() {
 
     try {
       await login(email, password);
-      router.push("/");
+      router.push("/dashboard");
     } catch (err: unknown) {
       const apiError = err as { detail?: string };
       setError(apiError.detail || "Invalid email or password");
