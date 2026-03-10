@@ -77,15 +77,20 @@ class ManualService:
         # Enqueue ingestion job
         from arq.connections import RedisSettings
 
-        arq_pool = await create_arq_pool(
-            RedisSettings.from_dsn(settings.REDIS_URL)
-        )
-        await arq_pool.enqueue_job(
-            "ingest_manual",
-            str(manual_id),
-            str(tenant_id),
-        )
-        await arq_pool.close()
+        try:
+            logger.info("Enqueuing ingest_manual job for manual %s (redis: %s)", manual_id, settings.REDIS_URL)
+            arq_pool = await create_arq_pool(
+                RedisSettings.from_dsn(settings.REDIS_URL)
+            )
+            job = await arq_pool.enqueue_job(
+                "ingest_manual",
+                str(manual_id),
+                str(tenant_id),
+            )
+            logger.info("Enqueued ingest_manual job %s for manual %s", job.job_id if job else "NONE", manual_id)
+            await arq_pool.close()
+        except Exception as e:
+            logger.error("Failed to enqueue ingest_manual for manual %s: %s", manual_id, e, exc_info=True)
 
         return _row_to_dict(row)
 
