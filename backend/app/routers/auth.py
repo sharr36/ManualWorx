@@ -1,15 +1,32 @@
 """Authentication endpoints — signup, login, logout, current user."""
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from ..models.user import AuthResponse, LoginRequest, SignupRequest
 from ..services import auth_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+SESSION_COOKIE_NAME = "manualworx_session"
+SESSION_MAX_AGE = 30 * 24 * 60 * 60  # 30 days
+
+
+def _set_session_cookie(response: Response, token: str, secure: bool) -> None:
+    """Set the session cookie on a response."""
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/",
+        max_age=SESSION_MAX_AGE,
+    )
+
 
 @router.post("/signup")
-async def signup(request: Request, body: SignupRequest) -> dict:
+async def signup(request: Request, body: SignupRequest) -> Response:
     """Create a new account (tenant + user)."""
     pool = request.app.state.db_pool
     try:
@@ -29,15 +46,17 @@ async def signup(request: Request, body: SignupRequest) -> dict:
             raise HTTPException(status_code=409, detail="Organization name already taken")
         raise HTTPException(status_code=400, detail="Signup failed")
 
-    return {
+    response = JSONResponse({
         "token": result["token"],
         "user": _serialize_record(result["user"]),
         "tenant": _serialize_record(result["tenant"]),
-    }
+    })
+    _set_session_cookie(response, result["token"], request.url.scheme == "https")
+    return response
 
 
 @router.post("/login")
-async def login(request: Request, body: LoginRequest) -> dict:
+async def login(request: Request, body: LoginRequest) -> Response:
     """Log in with email and password."""
     pool = request.app.state.db_pool
     result = await auth_service.login(pool, body.email, body.password)
@@ -45,17 +64,19 @@ async def login(request: Request, body: LoginRequest) -> dict:
     if not result:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    return {
+    response = JSONResponse({
         "token": result["token"],
         "user": _serialize_record(result["user"]),
         "tenant": _serialize_record(result["tenant"]),
-    }
+    })
+    _set_session_cookie(response, result["token"], request.url.scheme == "https")
+    return response
 
 
 @router.post("/logout")
-async def logout(request: Request) -> dict:
+async def logout(request: Request) -> Response:
     """Log out (delete session)."""
-    token = request.cookies.get("manualworx_session")
+    token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
@@ -65,7 +86,9 @@ async def logout(request: Request) -> dict:
         pool = request.app.state.db_pool
         await auth_service.logout(pool, token)
 
-    return {"status": "ok"}
+    response = JSONResponse({"status": "ok"})
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return response
 
 
 @router.get("/me")
