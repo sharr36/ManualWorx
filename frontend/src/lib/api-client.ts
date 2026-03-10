@@ -70,9 +70,14 @@ class ApiClient {
 
         clearTimeout(timeoutId);
 
-        // Handle 401 — redirect to login
+        // Handle 401 — redirect to login (skip for auth check and auth pages)
         if (res.status === 401) {
-          if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+          if (
+            typeof window !== "undefined" &&
+            !path.startsWith("/api/auth/") &&
+            !window.location.pathname.startsWith("/login") &&
+            !window.location.pathname.startsWith("/signup")
+          ) {
             window.location.href = "/login";
           }
           throw createApiError("Session expired. Please log in again.", 401);
