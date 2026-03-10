@@ -56,7 +56,7 @@ export function SignupForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">
+        <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400">
           {error}
         </div>
       )}
@@ -123,25 +123,25 @@ export function SignupForm() {
       <div className="space-y-2">
         <Label>Account Type</Label>
         <div className="flex gap-4">
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
             <input
               type="radio"
               name="tenantType"
               value="individual"
               checked={tenantType === "individual"}
               onChange={(e) => setTenantType(e.target.value)}
-              className="accent-emerald-600"
+              className="accent-emerald-500"
             />
             Individual
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
             <input
               type="radio"
               name="tenantType"
               value="shop"
               checked={tenantType === "shop"}
               onChange={(e) => setTenantType(e.target.value)}
-              className="accent-emerald-600"
+              className="accent-emerald-500"
             />
             Shop / Team
           </label>
@@ -152,9 +152,9 @@ export function SignupForm() {
         {loading ? "Creating account..." : "Create Account"}
       </Button>
 
-      <p className="text-center text-sm text-muted-foreground">
+      <p className="text-center text-sm text-slate-500">
         Already have an account?{" "}
-        <Link href="/login" className="text-emerald-600 hover:underline">
+        <Link href="/login" className="text-emerald-400 hover:underline">
           Sign in
         </Link>
       </p>

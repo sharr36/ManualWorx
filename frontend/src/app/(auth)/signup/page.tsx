@@ -6,7 +6,7 @@ import { SignupForm } from "@/components/auth/signup-form";
 export default function SignupPage() {
   return (
     <AuthProvider>
-      <h2 className="mb-6 text-center text-2xl font-bold text-slate-900">
+      <h2 className="mb-6 text-center text-2xl font-bold text-white">
         Create your account
       </h2>
       <SignupForm />
