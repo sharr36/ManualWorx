@@ -117,12 +117,11 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
           setStage(s);
 
           if (s === "ocr" && total > 0) {
-            // Upload = 0-50%, OCR = 50-85%
-            setProgress(50 + Math.round((page / total) * 35));
+            setProgress(Math.round((page / total) * 70));
           } else if (s === "chunking") {
-            setProgress(85);
+            setProgress(75);
           } else if (s === "embedding") {
-            setProgress(92);
+            setProgress(90);
           } else if (s === "ready") {
             setProgress(100);
             es.close();
@@ -165,13 +164,12 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
           manual_type: manualType,
         },
         (pct) => {
-          // Upload transfer is 0-50% of the overall bar
-          setProgress(Math.round(pct * 0.5));
+          setProgress(pct);
         }
       );
 
       // Upload done — now track processing via SSE
-      setProgress(50);
+      setProgress(0);
       setStage("processing");
 
       subscribeToProgress(result.id, () => {
@@ -307,11 +305,21 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
 
           {uploading && (
             <div className="space-y-1">
-              <Progress value={progress} className="h-2" />
-              <p className="text-center text-xs text-muted-foreground">
-                {STAGE_LABELS[stage] || "Processing…"}
-                {stage === "uploading" && progress > 0 && ` ${progress * 2}%`}
-              </p>
+              {stage === "uploading" ? (
+                <>
+                  <Progress value={progress} className="h-2" />
+                  <p className="text-center text-xs text-muted-foreground">
+                    Uploading file… {progress}%
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Progress value={progress} className="h-2" />
+                  <p className="text-center text-xs text-muted-foreground">
+                    {STAGE_LABELS[stage] || "Processing…"}
+                  </p>
+                </>
+              )}
             </div>
           )}
 
