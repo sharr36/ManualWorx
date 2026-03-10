@@ -16,6 +16,9 @@ CSRF_TOKEN_LENGTH = 32
 # Paths exempt from CSRF checks (webhooks, health, auth reads, docs)
 CSRF_EXEMPT_PATHS = frozenset({
     "/api/health",
+    "/api/auth/signup",
+    "/api/auth/login",
+    "/api/auth/logout",
     "/api/billing/webhook",
     "/docs",
     "/redoc",
