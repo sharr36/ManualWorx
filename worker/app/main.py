@@ -25,8 +25,13 @@ _config = Config()
 async def on_startup(ctx: dict) -> None:
     """Initialize shared resources for all worker tasks."""
     # Database pool
+    # Fly internal Postgres does not use SSL
+    dsn = _config.DATABASE_URL
+    use_ssl: object = False
+    if "sslmode=" not in dsn:
+        use_ssl = False
     ctx["pool"] = await asyncpg.create_pool(
-        _config.DATABASE_URL, min_size=2, max_size=10
+        dsn, min_size=2, max_size=10, ssl=use_ssl
     )
 
     # Qdrant client + ensure collection exists

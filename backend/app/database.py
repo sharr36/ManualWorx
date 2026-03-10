@@ -15,6 +15,7 @@ async def create_pool() -> asyncpg.Pool:
         settings.DATABASE_URL,
         min_size=2,
         max_size=20,
+        ssl=False,
     )
 
 
