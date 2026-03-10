@@ -75,12 +75,12 @@ class ManualService:
             )
 
         # Enqueue ingestion job
-        from arq.connections import RedisSettings
+        from manualworx_shared.config import arq_redis_settings
 
         try:
             logger.info("Enqueuing ingest_manual job for manual %s (redis: %s)", manual_id, settings.REDIS_URL)
             arq_pool = await create_arq_pool(
-                RedisSettings.from_dsn(settings.REDIS_URL)
+                arq_redis_settings(settings.REDIS_URL)
             )
             job = await arq_pool.enqueue_job(
                 "ingest_manual",

@@ -1,10 +1,13 @@
 """arq worker entry point."""
 
+import logging
+
 import asyncpg
 import boto3
-from arq.connections import RedisSettings
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, VectorParams
+
+from manualworx_shared.config import arq_redis_settings
 
 from .config import WorkerSettings as Config
 from .tasks.annotate_diagram import annotate_diagram
@@ -13,6 +16,8 @@ from .tasks.generate_embeddings import generate_embeddings
 from .tasks.generate_learning_path import generate_learning_path
 from .tasks.ingest_manual import ingest_manual
 from .tasks.process_page import process_page
+
+logger = logging.getLogger(__name__)
 
 _config = Config()
 
@@ -79,7 +84,7 @@ class WorkerSettings:
     on_startup = on_startup
     on_shutdown = on_shutdown
 
-    redis_settings = RedisSettings.from_dsn(_config.REDIS_URL)
+    redis_settings = arq_redis_settings(_config.REDIS_URL)
 
     max_jobs = 10
     job_timeout = 600  # 10 minutes per job
