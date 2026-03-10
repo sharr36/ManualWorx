@@ -1,5 +1,6 @@
 """arq worker entry point."""
 
+import asyncio
 import logging
 
 import asyncpg
@@ -21,18 +22,52 @@ logger = logging.getLogger(__name__)
 
 _config = Config()
 
+_DB_CONNECT_MAX_RETRIES = 5
+_DB_CONNECT_BASE_DELAY = 2  # seconds
+
 
 async def on_startup(ctx: dict) -> None:
     """Initialize shared resources for all worker tasks."""
     # Database pool
-    # Fly internal Postgres does not use SSL
     dsn = _config.DATABASE_URL
+    if not dsn or not dsn.startswith(("postgresql://", "postgres://")):
+        raise RuntimeError(
+            f"DATABASE_URL is missing or invalid (got scheme "
+            f"{dsn.split('://')[0]!r if '://' in dsn else '<empty>'}). "
+            f"Set a valid postgresql:// connection string."
+        )
+
+    # Fly internal Postgres does not use SSL
     use_ssl: object = False
     if "sslmode=" not in dsn:
         use_ssl = False
-    ctx["pool"] = await asyncpg.create_pool(
-        dsn, min_size=2, max_size=10, ssl=use_ssl
-    )
+
+    last_err: Exception | None = None
+    for attempt in range(1, _DB_CONNECT_MAX_RETRIES + 1):
+        try:
+            ctx["pool"] = await asyncpg.create_pool(
+                dsn, min_size=2, max_size=10, ssl=use_ssl
+            )
+            break
+        except (
+            ConnectionResetError,
+            ConnectionRefusedError,
+            OSError,
+            asyncpg.PostgresError,
+        ) as exc:
+            last_err = exc
+            if attempt == _DB_CONNECT_MAX_RETRIES:
+                raise
+            delay = _DB_CONNECT_BASE_DELAY * (2 ** (attempt - 1))
+            logger.warning(
+                "Database connection attempt %d/%d failed: %s. "
+                "Retrying in %ds...",
+                attempt,
+                _DB_CONNECT_MAX_RETRIES,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
 
     # Qdrant client + ensure collection exists
     ctx["qdrant"] = AsyncQdrantClient(url=_config.QDRANT_URL)
