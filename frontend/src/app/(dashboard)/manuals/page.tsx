@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { BookOpen, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ManualCard } from "@/components/manuals/manual-card";
+import { ManualCard, type ProcessingProgress } from "@/components/manuals/manual-card";
 import { UploadDialog } from "@/components/manuals/upload-dialog";
 import { api } from "@/lib/api-client";
 import type { Manual } from "@/types";
@@ -19,6 +19,8 @@ export default function ManualsPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterType>("All");
+  const [progressMap, setProgressMap] = useState<Record<string, ProcessingProgress>>({});
+  const eventSourcesRef = useRef<Map<string, EventSource>>(new Map());
 
   const fetchManuals = useCallback(async () => {
     try {
@@ -35,12 +37,78 @@ export default function ManualsPage() {
     fetchManuals();
   }, [fetchManuals]);
 
-  // Poll for processing status updates
+  // Subscribe to SSE for each processing/pending manual
   useEffect(() => {
-    const hasProcessing = manuals.some((m) => m.upload_status === "processing" || m.upload_status === "pending");
+    const processingManuals = manuals.filter(
+      (m) => m.upload_status === "processing" || m.upload_status === "pending"
+    );
+    const processingIds = new Set(processingManuals.map((m) => m.id));
+    const currentSources = eventSourcesRef.current;
+
+    // Close SSE for manuals no longer processing
+    for (const [id, es] of currentSources) {
+      if (!processingIds.has(id)) {
+        es.close();
+        currentSources.delete(id);
+      }
+    }
+
+    // Open SSE for newly processing manuals
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+    for (const manual of processingManuals) {
+      if (currentSources.has(manual.id)) continue;
+
+      const es = new EventSource(
+        `${apiBase}/api/manuals/${manual.id}/progress`,
+        { withCredentials: true }
+      );
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const { stage, page, total } = data;
+
+          setProgressMap((prev) => ({
+            ...prev,
+            [manual.id]: { stage, page, total },
+          }));
+
+          if (stage === "ready" || stage === "failed") {
+            es.close();
+            currentSources.delete(manual.id);
+            // Refresh manual list to get updated status
+            fetchManuals();
+          }
+        } catch {
+          // skip malformed events
+        }
+      };
+
+      es.onerror = () => {
+        es.close();
+        currentSources.delete(manual.id);
+      };
+
+      currentSources.set(manual.id, es);
+    }
+
+    return () => {
+      // Cleanup on unmount
+      for (const [, es] of currentSources) {
+        es.close();
+      }
+      currentSources.clear();
+    };
+  }, [manuals, fetchManuals]);
+
+  // Fallback polling for manuals that might not get SSE
+  useEffect(() => {
+    const hasProcessing = manuals.some(
+      (m) => m.upload_status === "processing" || m.upload_status === "pending"
+    );
     if (!hasProcessing) return;
 
-    const interval = setInterval(fetchManuals, 3000);
+    const interval = setInterval(fetchManuals, 5000);
     return () => clearInterval(interval);
   }, [manuals, fetchManuals]);
 
@@ -114,7 +182,10 @@ export default function ManualsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((manual) => (
             <Link key={manual.id} href={`/manuals/${manual.id}`}>
-              <ManualCard manual={manual} />
+              <ManualCard
+                manual={manual}
+                progress={progressMap[manual.id] ?? null}
+              />
             </Link>
           ))}
         </div>

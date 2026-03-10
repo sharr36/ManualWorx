@@ -13,17 +13,6 @@ import type { Manual } from "@/types";
 const MAX_FILE_SIZE_MB = 100;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
-const STAGE_LABELS: Record<string, string> = {
-  uploading: "Uploading file…",
-  processing: "Starting processing…",
-  downloading: "Preparing PDF…",
-  ocr: "Extracting text…",
-  chunking: "Chunking pages…",
-  embedding: "Generating embeddings…",
-  ready: "Complete!",
-  failed: "Processing failed",
-};
-
 interface UploadDialogProps {
   open: boolean;
   onClose: () => void;
@@ -40,9 +29,7 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState("uploading");
   const inputRef = useRef<HTMLInputElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   const reset = useCallback(() => {
     setFile(null);
@@ -53,11 +40,6 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     setError("");
     setUploading(false);
     setProgress(0);
-    setStage("uploading");
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
   }, []);
 
   const handleClose = useCallback(() => {
@@ -100,58 +82,12 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     [title]
   );
 
-  const subscribeToProgress = useCallback(
-    (manualId: string, onDone: () => void) => {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
-      const es = new EventSource(
-        `${apiBase}/api/manuals/${manualId}/progress`,
-        { withCredentials: true }
-      );
-      eventSourceRef.current = es;
-
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          const { stage: s, page, total } = data;
-
-          setStage(s);
-
-          if (s === "ocr" && total > 0) {
-            setProgress(Math.round((page / total) * 70));
-          } else if (s === "chunking") {
-            setProgress(75);
-          } else if (s === "embedding") {
-            setProgress(90);
-          } else if (s === "ready") {
-            setProgress(100);
-            es.close();
-            onDone();
-          } else if (s === "failed") {
-            es.close();
-            setError("Processing failed — please try again");
-            setUploading(false);
-          }
-        } catch {
-          // skip malformed events
-        }
-      };
-
-      es.onerror = () => {
-        // SSE connection lost — don't block the user, just close
-        es.close();
-        onDone();
-      };
-    },
-    []
-  );
-
   const handleSubmit = useCallback(async () => {
     if (!file || !title.trim()) return;
 
     setUploading(true);
     setError("");
     setProgress(0);
-    setStage("uploading");
 
     try {
       const result = await api.uploadFile<Manual>(
@@ -168,22 +104,17 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
         }
       );
 
-      // Upload done — now track processing via SSE
-      setProgress(0);
-      setStage("processing");
-
-      subscribeToProgress(result.id, () => {
-        toast.success("Manual uploaded and processed");
-        const manual = result;
-        reset();
-        onSuccess(manual);
-      });
+      // Upload done — close dialog, processing continues in background
+      toast.success("Manual uploaded — processing will continue in the background");
+      const manual = result;
+      reset();
+      onSuccess(manual);
     } catch (err: any) {
       setError(err.detail || err.message || "Upload failed");
       setUploading(false);
       setProgress(0);
     }
-  }, [file, title, make, model, manualType, reset, onSuccess, subscribeToProgress]);
+  }, [file, title, make, model, manualType, reset, onSuccess]);
 
   if (!open) return null;
 
@@ -305,21 +236,10 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
 
           {uploading && (
             <div className="space-y-1">
-              {stage === "uploading" ? (
-                <>
-                  <Progress value={progress} className="h-2" />
-                  <p className="text-center text-xs text-muted-foreground">
-                    Uploading file… {progress}%
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Progress value={progress} className="h-2" />
-                  <p className="text-center text-xs text-muted-foreground">
-                    {STAGE_LABELS[stage] || "Processing…"}
-                  </p>
-                </>
-              )}
+              <Progress value={progress} className="h-2" />
+              <p className="text-center text-xs text-muted-foreground">
+                Uploading file… {progress}%
+              </p>
             </div>
           )}
 
