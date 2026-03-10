@@ -75,26 +75,17 @@ class ManualService:
             )
 
         # Enqueue ingestion job
-        if redis:
-            arq_pool = await create_arq_pool(redis.connection_pool)
-            await arq_pool.enqueue_job(
-                "ingest_manual",
-                str(manual_id),
-                str(tenant_id),
-            )
-        else:
-            # Fallback: create a new arq connection
-            from arq.connections import RedisSettings
+        from arq.connections import RedisSettings
 
-            arq_pool = await create_arq_pool(
-                RedisSettings.from_dsn(settings.REDIS_URL)
-            )
-            await arq_pool.enqueue_job(
-                "ingest_manual",
-                str(manual_id),
-                str(tenant_id),
-            )
-            await arq_pool.close()
+        arq_pool = await create_arq_pool(
+            RedisSettings.from_dsn(settings.REDIS_URL)
+        )
+        await arq_pool.enqueue_job(
+            "ingest_manual",
+            str(manual_id),
+            str(tenant_id),
+        )
+        await arq_pool.close()
 
         return _row_to_dict(row)
 
