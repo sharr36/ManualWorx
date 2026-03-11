@@ -42,7 +42,6 @@ async def on_startup(ctx: dict) -> None:
     if "sslmode=" not in dsn:
         use_ssl = False
 
-    last_err: Exception | None = None
     for attempt in range(1, _DB_CONNECT_MAX_RETRIES + 1):
         try:
             ctx["pool"] = await asyncpg.create_pool(
@@ -54,8 +53,8 @@ async def on_startup(ctx: dict) -> None:
             ConnectionRefusedError,
             OSError,
             asyncpg.PostgresError,
+            asyncpg.InterfaceError,
         ) as exc:
-            last_err = exc
             if attempt == _DB_CONNECT_MAX_RETRIES:
                 raise
             delay = _DB_CONNECT_BASE_DELAY * (2 ** (attempt - 1))
@@ -70,16 +69,32 @@ async def on_startup(ctx: dict) -> None:
             await asyncio.sleep(delay)
 
     # Qdrant client + ensure collection exists
-    ctx["qdrant"] = AsyncQdrantClient(url=_config.QDRANT_URL)
-    collections = await ctx["qdrant"].get_collections()
-    existing = {c.name for c in collections.collections}
-    if _config.COLLECTION_NAME not in existing:
-        await ctx["qdrant"].create_collection(
-            collection_name=_config.COLLECTION_NAME,
-            vectors_config=VectorParams(
-                size=_config.EMBEDDING_DIMENSION, distance=Distance.COSINE
-            ),
-        )
+    for attempt in range(1, _DB_CONNECT_MAX_RETRIES + 1):
+        try:
+            ctx["qdrant"] = AsyncQdrantClient(url=_config.QDRANT_URL)
+            collections = await ctx["qdrant"].get_collections()
+            existing = {c.name for c in collections.collections}
+            if _config.COLLECTION_NAME not in existing:
+                await ctx["qdrant"].create_collection(
+                    collection_name=_config.COLLECTION_NAME,
+                    vectors_config=VectorParams(
+                        size=_config.EMBEDDING_DIMENSION, distance=Distance.COSINE
+                    ),
+                )
+            break
+        except Exception as exc:
+            if attempt == _DB_CONNECT_MAX_RETRIES:
+                raise
+            delay = _DB_CONNECT_BASE_DELAY * (2 ** (attempt - 1))
+            logger.warning(
+                "Qdrant connection attempt %d/%d failed: %s. "
+                "Retrying in %ds...",
+                attempt,
+                _DB_CONNECT_MAX_RETRIES,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
 
     # S3/Tigris storage client
     ctx["s3"] = boto3.client(
