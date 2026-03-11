@@ -31,10 +31,10 @@ async def on_startup(ctx: dict) -> None:
     # Database pool
     dsn = _config.DATABASE_URL
     if not dsn or not dsn.startswith(("postgresql://", "postgres://")):
+        scheme = repr(dsn.split("://")[0]) if "://" in dsn else "<empty>"
         raise RuntimeError(
-            f"DATABASE_URL is missing or invalid (got scheme "
-            f"{dsn.split('://')[0]!r if '://' in dsn else '<empty>'}). "
-            f"Set a valid postgresql:// connection string."
+            "DATABASE_URL is missing or invalid (got scheme %s). "
+            "Set a valid postgresql:// connection string." % scheme
         )
 
     # Fly internal Postgres does not use SSL
