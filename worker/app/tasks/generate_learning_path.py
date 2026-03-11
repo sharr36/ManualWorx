@@ -16,7 +16,7 @@ async def generate_learning_path(ctx: dict, manual_id: str, tenant_id: str) -> d
     with modules, lessons, and quiz checkpoints.
     """
     pool = ctx["pool"]
-    settings = ctx["settings"]
+    settings = ctx["config"]
 
     logger.info("Generating learning path for manual %s", manual_id)
 
@@ -93,7 +93,7 @@ Return JSON only:
 ```"""
 
     response = await client.messages.create(
-        model=settings.DEFAULT_MODEL,
+        model=settings.CLASSIFICATION_MODEL,
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
     )
