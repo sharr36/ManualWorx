@@ -52,7 +52,6 @@ async def on_startup(ctx: dict) -> None:
             ConnectionResetError,
             ConnectionRefusedError,
             OSError,
-            asyncpg.PostgresError,
             asyncpg.InterfaceError,
         ) as exc:
             if attempt == _DB_CONNECT_MAX_RETRIES:
