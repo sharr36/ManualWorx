@@ -116,8 +116,22 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             logger.info("[%s] Processing page %d/%d", manual_id[:8], page_num + 1, page_count)
             await _publish_progress(ctx, manual_id, "ocr", page=page_num + 1, total=page_count)
 
-            # OCR + render in thread pool (non-blocking)
-            result = await process_page_async(pdf_bytes, page_num, dpi=config.PDF_DPI)
+            # OCR + render in thread pool with per-page timeout
+            try:
+                result = await asyncio.wait_for(
+                    process_page_async(pdf_bytes, page_num, dpi=config.PDF_DPI),
+                    timeout=120,  # 2 minutes max per page
+                )
+            except asyncio.TimeoutError:
+                logger.warning("[%s] Page %d timed out after 120s, inserting placeholder", manual_id[:8], page_num)
+                result = {
+                    "text": "",
+                    "has_table": False,
+                    "has_diagram": False,
+                    "classification": "text",
+                    "confidence": 0.0,
+                    "image_bytes": b"",
+                }
 
             # Upload page image to storage
             image_key = f"manuals/{tenant_id}/{manual_id}/pages/{page_num}.png"

@@ -49,11 +49,14 @@ def _process_page_sync(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
     # Extract text
     text = page.get_text("text")
 
-    # Detect tables
+    # Detect tables (find_tables can hang on complex pages, use heuristic fallback)
     has_table = False
     try:
-        tables = page.find_tables()
-        has_table = len(tables.tables) > 0
+        if len(text) < 50_000:  # Skip find_tables on very large/complex pages
+            tables = page.find_tables()
+            has_table = len(tables.tables) > 0
+        else:
+            has_table = bool(_TABLE_PATTERNS.search(text))
     except Exception:
         has_table = bool(_TABLE_PATTERNS.search(text))
 
