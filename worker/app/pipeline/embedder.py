@@ -25,13 +25,27 @@ class Embedder:
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Call Together.ai embedding API for a batch of texts."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Truncate any texts that exceed the model's token limit (~8k tokens ≈ ~32k chars)
+        max_chars = 30_000
+        truncated = [t[:max_chars] if len(t) > max_chars else t for t in texts]
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 TOGETHER_EMBED_URL,
                 headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"model": TOGETHER_MODEL, "input": texts},
+                json={"model": TOGETHER_MODEL, "input": truncated},
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                logger.error(
+                    "Together.ai embedding API error %d: %s",
+                    resp.status_code,
+                    resp.text[:500],
+                )
+                resp.raise_for_status()
             data = resp.json()
         return [item["embedding"] for item in data["data"]]
 

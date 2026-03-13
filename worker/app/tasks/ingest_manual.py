@@ -159,7 +159,7 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                 chunk["chunk_id"] = str(row["id"])
                 chunk_records.append(chunk)
 
-        # 6. Embed all chunks and upsert to Qdrant
+        # 6. Embed all chunks and upsert to Qdrant (with retry)
         await _publish_progress(ctx, manual_id, "embedding", page=page_count, total=page_count)
         if chunk_records:
             embedder = Embedder(
@@ -167,21 +167,35 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                 together_api_key=ctx["together_api_key"],
                 batch_size=config.EMBED_BATCH_SIZE,
             )
-            vector_results = await embedder.embed_and_store(
-                chunks=chunk_records,
-                collection=ctx["collection_name"],
-                tenant_id=tenant_id,
-                manual_id=manual_id,
-            )
+            vector_results = None
+            for embed_attempt in range(1, 4):
+                try:
+                    vector_results = await embedder.embed_and_store(
+                        chunks=chunk_records,
+                        collection=ctx["collection_name"],
+                        tenant_id=tenant_id,
+                        manual_id=manual_id,
+                    )
+                    break
+                except Exception as embed_err:
+                    if embed_attempt == 3:
+                        raise
+                    delay = 5 * embed_attempt
+                    logger.warning(
+                        "Embedding attempt %d/3 failed for manual %s: %s. Retrying in %ds...",
+                        embed_attempt, manual_id, embed_err, delay,
+                    )
+                    await asyncio.sleep(delay)
 
             # Update chunks with vector_id
-            async with pool.acquire() as conn:
-                for vr in vector_results:
-                    await conn.execute(
-                        "UPDATE chunks SET vector_id = $1 WHERE id = $2",
-                        vr["vector_id"],
-                        UUID(vr["chunk_id"]),
-                    )
+            if vector_results:
+                async with pool.acquire() as conn:
+                    for vr in vector_results:
+                        await conn.execute(
+                            "UPDATE chunks SET vector_id = $1 WHERE id = $2",
+                            vr["vector_id"],
+                            UUID(vr["chunk_id"]),
+                        )
 
         # 7. Update status to 'ready'
         await _publish_progress(ctx, manual_id, "ready", page=page_count, total=page_count)
