@@ -232,6 +232,20 @@ export default function ManualDetailPage() {
                 />
               )}
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRetry}
+              disabled={retrying}
+              title="Re-queue if processing appears stuck"
+            >
+              {retrying ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-3.5 w-3.5" />
+              )}
+              Retry
+            </Button>
           </CardContent>
         </Card>
       )}
