@@ -7,8 +7,7 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
-from ..pipeline.ocr_processor import OCRProcessor
-from ..pipeline.pdf_splitter import PDFSplitter
+from ..pipeline.ocr_processor import process_page_async
 
 
 async def process_page(ctx: dict, page_data: dict) -> dict:
@@ -35,32 +34,23 @@ async def process_page(ctx: dict, page_data: dict) -> dict:
     )
     pdf_bytes = response["Body"].read()
 
-    # OCR the specific page
-    ocr = OCRProcessor(max_concurrent=1)
-    result = await ocr.process_page(pdf_bytes, page_number)
-
-    # Render page image
-    splitter = PDFSplitter(dpi=config.PDF_DPI)
-    import fitz
-
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    mat = fitz.Matrix(config.PDF_DPI / 72.0, config.PDF_DPI / 72.0)
-    pix = doc[page_number].get_pixmap(matrix=mat)
-    png_bytes = pix.tobytes("png")
-    doc.close()
+    # OCR + render in thread pool (non-blocking)
+    result = await process_page_async(pdf_bytes, page_number, dpi=config.PDF_DPI)
 
     # Upload page image
     image_key = f"manuals/{tenant_id}/{manual_id}/pages/{page_number}.png"
-    await loop.run_in_executor(
-        None,
-        partial(
-            s3.put_object,
-            Bucket=bucket,
-            Key=image_key,
-            Body=png_bytes,
-            ContentType="image/png",
-        ),
-    )
+    image_bytes = result.pop("image_bytes")
+    if image_bytes:
+        await loop.run_in_executor(
+            None,
+            partial(
+                s3.put_object,
+                Bucket=bucket,
+                Key=image_key,
+                Body=image_bytes,
+                ContentType="image/png",
+            ),
+        )
 
     # Upsert page record
     async with pool.acquire() as conn:

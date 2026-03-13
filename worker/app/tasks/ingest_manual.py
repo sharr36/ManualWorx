@@ -174,56 +174,62 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                 chunk["chunk_id"] = str(row["id"])
                 chunk_records.append(chunk)
 
-        # 6. Embed all chunks and upsert to Qdrant (with retry + timeout)
+        # 6. Embed all chunks and upsert to Qdrant (non-fatal — manual is still usable without vectors)
         await _publish_progress(ctx, manual_id, "embedding", page=page_count, total=page_count)
         if chunk_records and ctx.get("qdrant") is not None:
             logger.info("[%s] Embedding %d chunks", manual_id[:8], len(chunk_records))
-            embedder = Embedder(
-                qdrant=ctx["qdrant"],
-                together_api_key=ctx["together_api_key"],
-                batch_size=config.EMBED_BATCH_SIZE,
-            )
-            vector_results = None
-            for embed_attempt in range(1, 4):
-                try:
-                    vector_results = await asyncio.wait_for(
-                        embedder.embed_and_store(
-                            chunks=chunk_records,
-                            collection=ctx["collection_name"],
-                            tenant_id=tenant_id,
-                            manual_id=manual_id,
-                        ),
-                        timeout=300,  # 5 minute max for embedding step
-                    )
-                    break
-                except asyncio.TimeoutError:
-                    logger.error(
-                        "Embedding attempt %d/3 timed out for manual %s",
-                        embed_attempt, manual_id,
-                    )
-                    if embed_attempt == 3:
-                        raise RuntimeError(f"Embedding timed out after 3 attempts for manual {manual_id}")
-                    await asyncio.sleep(5 * embed_attempt)
-                except Exception as embed_err:
-                    if embed_attempt == 3:
-                        raise
-                    delay = 5 * embed_attempt
-                    logger.warning(
-                        "Embedding attempt %d/3 failed for manual %s: %s. Retrying in %ds...",
-                        embed_attempt, manual_id, embed_err, delay,
-                    )
-                    await asyncio.sleep(delay)
-
-            # Update chunks with vector_id
-            if vector_results:
-                async with pool.acquire() as conn:
-                    for vr in vector_results:
-                        await conn.execute(
-                            "UPDATE chunks SET vector_id = $1 WHERE id = $2",
-                            vr["vector_id"],
-                            UUID(vr["chunk_id"]),
+            try:
+                embedder = Embedder(
+                    qdrant=ctx["qdrant"],
+                    together_api_key=ctx["together_api_key"],
+                    batch_size=config.EMBED_BATCH_SIZE,
+                )
+                vector_results = None
+                for embed_attempt in range(1, 4):
+                    try:
+                        vector_results = await asyncio.wait_for(
+                            embedder.embed_and_store(
+                                chunks=chunk_records,
+                                collection=ctx["collection_name"],
+                                tenant_id=tenant_id,
+                                manual_id=manual_id,
+                            ),
+                            timeout=300,  # 5 minute max for embedding step
                         )
-            logger.info("[%s] Embedding complete", manual_id[:8])
+                        break
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            "Embedding attempt %d/3 timed out for manual %s",
+                            embed_attempt, manual_id,
+                        )
+                        if embed_attempt == 3:
+                            raise
+                        await asyncio.sleep(5 * embed_attempt)
+                    except Exception as embed_err:
+                        if embed_attempt == 3:
+                            raise
+                        delay = 5 * embed_attempt
+                        logger.warning(
+                            "Embedding attempt %d/3 failed for manual %s: %s. Retrying in %ds...",
+                            embed_attempt, manual_id, embed_err, delay,
+                        )
+                        await asyncio.sleep(delay)
+
+                # Update chunks with vector_id
+                if vector_results:
+                    async with pool.acquire() as conn:
+                        for vr in vector_results:
+                            await conn.execute(
+                                "UPDATE chunks SET vector_id = $1 WHERE id = $2",
+                                vr["vector_id"],
+                                UUID(vr["chunk_id"]),
+                            )
+                logger.info("[%s] Embedding complete", manual_id[:8])
+            except Exception as embed_err:
+                logger.error(
+                    "[%s] Embedding failed (non-fatal): %s. Manual will be marked ready without vectors.",
+                    manual_id[:8], embed_err,
+                )
         elif chunk_records:
             logger.warning("Skipping embedding for manual %s — Qdrant not available", manual_id)
 
