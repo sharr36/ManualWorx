@@ -206,7 +206,17 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                             raise
                         await asyncio.sleep(5 * embed_attempt)
                     except Exception as embed_err:
-                        if embed_attempt == 3:
+                        # Don't retry client errors (4xx) — they're permanent
+                        is_client_error = (
+                            hasattr(embed_err, 'response')
+                            and 400 <= embed_err.response.status_code < 500
+                        )
+                        if embed_attempt == 3 or is_client_error:
+                            if is_client_error:
+                                logger.error(
+                                    "Embedding failed with client error for manual %s: %s (not retrying)",
+                                    manual_id, embed_err,
+                                )
                             raise
                         delay = 5 * embed_attempt
                         logger.warning(
@@ -263,7 +273,9 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             "chunks": len(chunk_records),
         }
 
-    except Exception as e:
+    except BaseException as e:
+        # Catch BaseException to handle asyncio.CancelledError (Python 3.11+)
+        # which arq raises when the job timeout is exceeded
         logger.error("Ingestion failed for manual %s: %s", manual_id, e, exc_info=True)
         # Update status to 'failed'
         try:
@@ -275,6 +287,10 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             await _publish_progress(ctx, manual_id, "failed")
         except Exception as db_err:
             logger.error("Failed to update manual %s status to 'failed': %s", manual_id, db_err)
+
+        # Re-raise CancelledError so arq can handle cleanup properly
+        if isinstance(e, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+            raise
 
         return {
             "status": "failed",
