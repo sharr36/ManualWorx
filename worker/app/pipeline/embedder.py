@@ -7,7 +7,7 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import PointStruct
 
 TOGETHER_EMBED_URL = "https://api.together.xyz/v1/embeddings"
-TOGETHER_MODEL = "togethercomputer/m2-bert-80M-8k-retrieval"
+TOGETHER_MODEL = "BAAI/bge-base-en-v1.5"
 
 
 class Embedder:
@@ -29,8 +29,8 @@ class Embedder:
 
         logger = logging.getLogger(__name__)
 
-        # Truncate any texts that exceed the model's token limit (~8k tokens ≈ ~32k chars)
-        max_chars = 30_000
+        # Truncate any texts that exceed the model's token limit (~512 tokens ≈ ~2k chars)
+        max_chars = 2_000
         truncated = [t[:max_chars] if len(t) > max_chars else t for t in texts]
 
         async with httpx.AsyncClient(timeout=60.0) as client:
