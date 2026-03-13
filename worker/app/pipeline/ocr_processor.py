@@ -1,9 +1,11 @@
 """OCR processing — extracts text from PDF pages using PyMuPDF."""
 
 import asyncio
+import gc
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Process, Queue
 
 import fitz
 
@@ -21,28 +23,31 @@ _DIAGRAM_KEYWORDS = re.compile(
     r"(fig\w*\s*\d|figure\s*\d|diagram|illustration|exploded|view)", re.I
 )
 
-# Shared thread pool for CPU-bound fitz work
-_executor = ThreadPoolExecutor(max_workers=2)
+_EMPTY_RESULT = {
+    "text": "",
+    "has_table": False,
+    "has_diagram": False,
+    "classification": "text",
+    "confidence": 0.0,
+    "image_bytes": b"",
+}
 
 
-def _process_page_sync(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
-    """Synchronous page processing: OCR + render to PNG in one pass.
+def _process_page_in_subprocess(result_queue: Queue, pdf_bytes: bytes, page_number: int, dpi: int):
+    """Run in a subprocess so it can be hard-killed on timeout."""
+    try:
+        result = _process_single_page(pdf_bytes, page_number, dpi)
+        result_queue.put(result)
+    except Exception as e:
+        result_queue.put({"error": str(e)})
 
-    Returns dict with page_number, text, has_table, has_diagram, classification,
-    confidence, and image_bytes (PNG).
-    """
+
+def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
+    """Process one page: extract text, classify, render PNG."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     if page_number >= len(doc):
         doc.close()
-        return {
-            "page_number": page_number,
-            "text": "",
-            "has_table": False,
-            "has_diagram": False,
-            "classification": "text",
-            "confidence": 0.0,
-            "image_bytes": b"",
-        }
+        return dict(_EMPTY_RESULT, page_number=page_number)
 
     page = doc[page_number]
 
@@ -52,7 +57,7 @@ def _process_page_sync(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
     # Detect tables (find_tables can hang on complex pages, use heuristic fallback)
     has_table = False
     try:
-        if len(text) < 50_000:  # Skip find_tables on very large/complex pages
+        if len(text) < 50_000:
             tables = page.find_tables()
             has_table = len(tables.tables) > 0
         else:
@@ -87,12 +92,67 @@ def _process_page_sync(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
     }
 
 
-async def process_page_async(pdf_bytes: bytes, page_number: int, dpi: int = 300) -> dict:
-    """Process a single page in a thread pool (non-blocking)."""
+async def process_page_async(pdf_bytes: bytes, page_number: int, dpi: int = 150) -> dict:
+    """Process a single page in a subprocess with hard-kill timeout.
+
+    Uses a real subprocess so that if the page hangs (complex table detection,
+    huge pixmap rendering), we can kill it — unlike threads which cannot be
+    interrupted.
+
+    Retry strategy: try at requested DPI, retry at 72 DPI, then placeholder.
+    """
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        _executor, _process_page_sync, pdf_bytes, page_number, dpi
-    )
+
+    for attempt_dpi in [dpi, 72]:
+        result = await _run_page_in_process(loop, pdf_bytes, page_number, attempt_dpi, timeout=90)
+        if result is not None:
+            return result
+        logger.warning(
+            "Page %d failed at %d DPI, %s",
+            page_number,
+            attempt_dpi,
+            "retrying at 72 DPI" if attempt_dpi != 72 else "using placeholder",
+        )
+
+    # Both attempts failed — return placeholder
+    logger.error("Page %d failed all attempts, inserting placeholder", page_number)
+    return dict(_EMPTY_RESULT, page_number=page_number)
+
+
+async def _run_page_in_process(loop, pdf_bytes: bytes, page_number: int, dpi: int, timeout: int):
+    """Run page processing in a subprocess with a hard kill timeout.
+
+    Returns the result dict on success, or None if the subprocess timed out / crashed.
+    """
+    q: Queue = Queue()
+    proc = Process(target=_process_page_in_subprocess, args=(q, pdf_bytes, page_number, dpi))
+    proc.start()
+
+    try:
+        # Poll the queue in a non-blocking way so we don't block the event loop
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, q.get, True, timeout),
+            timeout=timeout + 5,
+        )
+
+        if isinstance(result, dict) and "error" in result and "text" not in result:
+            logger.warning("Page %d errored at %d DPI: %s", page_number, dpi, result["error"])
+            return None
+
+        return result
+
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.warning("Page %d timed out / crashed at %d DPI: %s", page_number, dpi, e)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=5)
+        return None
+    finally:
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=5)
+        proc.close()
+        q.close()
 
 
 def _classify_page(text: str, has_table: bool, has_diagram: bool) -> str:

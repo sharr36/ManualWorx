@@ -34,7 +34,7 @@ class WorkerSettings(BaseSettings):
     CLASSIFICATION_MODEL: str = "claude-haiku-4-5-20251001"
 
     # Processing
-    PDF_DPI: int = 300
+    PDF_DPI: int = 150
     MAX_CONCURRENT_PAGES: int = 4
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
