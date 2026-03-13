@@ -7,7 +7,7 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import PointStruct
 
 TOGETHER_EMBED_URL = "https://api.together.xyz/v1/embeddings"
-TOGETHER_MODEL = "togethercomputer/m2-bert-80M-8k-retrieval"
+TOGETHER_MODEL = "BAAI/bge-base-en-v1.5"
 
 
 class Embedder:
