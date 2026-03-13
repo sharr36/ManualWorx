@@ -231,12 +231,11 @@ async def retry_manual(manual_id: UUID, request: Request) -> ManualResponse:
             detail=f"Cannot retry manual with status '{row['upload_status']}'"
         )
 
-    # Clean up partial data from previous attempt
+    # Clean up chunks/vectors from previous attempt (keep pages — they're expensive to reprocess)
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM chunks WHERE page_id IN (SELECT id FROM pages WHERE manual_id = $1)", manual_id)
-        await conn.execute("DELETE FROM pages WHERE manual_id = $1", manual_id)
         await conn.execute(
-            "UPDATE manuals SET upload_status = 'pending', total_pages = NULL, updated_at = NOW() WHERE id = $1",
+            "UPDATE manuals SET upload_status = 'pending', updated_at = NOW() WHERE id = $1",
             manual_id,
         )
 

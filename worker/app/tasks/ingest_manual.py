@@ -86,10 +86,33 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             )
 
         # 4. Process each page: OCR + render + upload + insert (one at a time)
-        await _publish_progress(ctx, manual_id, "ocr", page=0, total=page_count)
+        # Check for already-processed pages (resume support for retries)
+        async with pool.acquire() as conn:
+            existing_pages = await conn.fetch(
+                "SELECT id, page_number, extracted_text, classification FROM pages WHERE manual_id = $1 ORDER BY page_number",
+                UUID(manual_id),
+            )
+        existing_page_nums = {row["page_number"] for row in existing_pages}
+
+        if existing_page_nums:
+            logger.info("[%s] Resuming — %d of %d pages already processed", manual_id[:8], len(existing_page_nums), page_count)
+
+        await _publish_progress(ctx, manual_id, "ocr", page=len(existing_page_nums), total=page_count)
         pages_data = []
 
+        # Load existing pages into pages_data
+        for row in existing_pages:
+            pages_data.append({
+                "page_id": str(row["id"]),
+                "page_number": row["page_number"],
+                "text": row["extracted_text"] or "",
+                "classification": row["classification"] or "text",
+            })
+
         for page_num in range(page_count):
+            if page_num in existing_page_nums:
+                continue
+
             logger.info("[%s] Processing page %d/%d", manual_id[:8], page_num + 1, page_count)
             await _publish_progress(ctx, manual_id, "ocr", page=page_num + 1, total=page_count)
 
