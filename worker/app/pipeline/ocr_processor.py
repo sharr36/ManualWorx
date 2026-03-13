@@ -20,7 +20,7 @@ _ELECTRICAL_KEYWORDS = re.compile(
     r"(wiring|harness|connector|pin\s*\d|ECM|fuse|relay|voltage)", re.I
 )
 _DIAGRAM_KEYWORDS = re.compile(
-    r"(fig\w*\s*\d|figure\s*\d|diagram|illustration|exploded|view)", re.I
+    r"(fig\w*\.?\s*\d|figure\s*\d|diagram|illustration|exploded\s*view)", re.I
 )
 
 _EMPTY_RESULT = {
@@ -66,8 +66,30 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
         has_table = bool(_TABLE_PATTERNS.search(text))
 
     # Check for images (potential diagrams)
-    image_count = len(page.get_images(full=True))
-    has_diagram = image_count > 0
+    # Require multiple images or a large image to flag as diagram —
+    # a single small image is usually just a logo/header.
+    images = page.get_images(full=True)
+    image_count = len(images)
+    if image_count >= 3:
+        has_diagram = True
+    elif image_count >= 1:
+        # Check if any image covers a significant portion of the page
+        page_area = page.rect.width * page.rect.height
+        has_diagram = False
+        for img in images:
+            xref = img[0]
+            try:
+                rects = page.get_image_rects(xref)
+                for r in rects:
+                    if r.width * r.height > page_area * 0.15:
+                        has_diagram = True
+                        break
+            except Exception:
+                pass
+            if has_diagram:
+                break
+    else:
+        has_diagram = False
 
     # Classify the page
     classification = _classify_page(text, has_table, has_diagram)
