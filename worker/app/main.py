@@ -104,14 +104,23 @@ async def on_startup(ctx: dict) -> None:
             )
             await asyncio.sleep(delay)
 
-    # S3/Tigris storage client
-    ctx["s3"] = boto3.client(
-        "s3",
-        endpoint_url=_config.AWS_ENDPOINT_URL_S3,
-        aws_access_key_id=_config.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=_config.AWS_SECRET_ACCESS_KEY,
-    )
+    # S3/Tigris storage client (optional — degrade gracefully)
+    ctx["s3"] = None
     ctx["bucket"] = _config.BUCKET_NAME
+    if _config.AWS_ENDPOINT_URL_S3 and _config.AWS_ENDPOINT_URL_S3.startswith("http"):
+        try:
+            ctx["s3"] = boto3.client(
+                "s3",
+                endpoint_url=_config.AWS_ENDPOINT_URL_S3,
+                aws_access_key_id=_config.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=_config.AWS_SECRET_ACCESS_KEY,
+            )
+        except Exception as exc:
+            logger.warning("S3/Tigris client init failed: %s", exc)
+    else:
+        logger.warning(
+            "AWS_ENDPOINT_URL_S3 not configured — file storage tasks will fail."
+        )
 
     # Embedding config
     ctx["together_api_key"] = _config.TOGETHER_API_KEY
@@ -128,7 +137,7 @@ async def on_shutdown(ctx: dict) -> None:
     """Clean up shared resources."""
     if "pool" in ctx:
         await ctx["pool"].close()
-    if "qdrant" in ctx:
+    if ctx.get("qdrant") is not None:
         await ctx["qdrant"].close()
 
 
