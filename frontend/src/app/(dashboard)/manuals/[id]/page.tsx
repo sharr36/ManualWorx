@@ -83,6 +83,8 @@ export default function ManualDetailPage() {
   }, [manualId, router]);
 
   // SSE progress stream while processing
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     if (
       !manual ||
@@ -132,10 +134,15 @@ export default function ManualDetailPage() {
           }
         } catch {}
       }, 3000);
+      pollingRef.current = interval;
     };
 
     return () => {
       es.close();
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
     };
   }, [manual?.upload_status, manualId, apiBase]);
 
@@ -351,6 +358,9 @@ export default function ManualDetailPage() {
                         alt={`Page ${page.page_number + 1}`}
                         className="h-16 w-12 object-cover"
                         loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
                       />
                     </button>
                     <div className="min-w-0 flex-1">

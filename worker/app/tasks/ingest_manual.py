@@ -134,6 +134,8 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                         ContentType="image/png",
                     ),
                 )
+            else:
+                image_key = None  # Don't store a key for non-existent images
 
             # Insert page record
             async with pool.acquire() as conn:
