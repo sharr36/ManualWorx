@@ -71,7 +71,7 @@ async def on_startup(ctx: dict) -> None:
     ctx["qdrant"] = None
     for attempt in range(1, _DB_CONNECT_MAX_RETRIES + 1):
         try:
-            client = AsyncQdrantClient(url=_config.QDRANT_URL)
+            client = AsyncQdrantClient(url=_config.QDRANT_URL, timeout=30)
             collections = await client.get_collections()
             existing = {c.name for c in collections.collections}
             if _config.COLLECTION_NAME not in existing:

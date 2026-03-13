@@ -159,9 +159,9 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                 chunk["chunk_id"] = str(row["id"])
                 chunk_records.append(chunk)
 
-        # 6. Embed all chunks and upsert to Qdrant (with retry)
+        # 6. Embed all chunks and upsert to Qdrant (with retry + timeout)
         await _publish_progress(ctx, manual_id, "embedding", page=page_count, total=page_count)
-        if chunk_records:
+        if chunk_records and ctx.get("qdrant") is not None:
             embedder = Embedder(
                 qdrant=ctx["qdrant"],
                 together_api_key=ctx["together_api_key"],
@@ -170,13 +170,24 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             vector_results = None
             for embed_attempt in range(1, 4):
                 try:
-                    vector_results = await embedder.embed_and_store(
-                        chunks=chunk_records,
-                        collection=ctx["collection_name"],
-                        tenant_id=tenant_id,
-                        manual_id=manual_id,
+                    vector_results = await asyncio.wait_for(
+                        embedder.embed_and_store(
+                            chunks=chunk_records,
+                            collection=ctx["collection_name"],
+                            tenant_id=tenant_id,
+                            manual_id=manual_id,
+                        ),
+                        timeout=300,  # 5 minute max for embedding step
                     )
                     break
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "Embedding attempt %d/3 timed out for manual %s",
+                        embed_attempt, manual_id,
+                    )
+                    if embed_attempt == 3:
+                        raise RuntimeError(f"Embedding timed out after 3 attempts for manual {manual_id}")
+                    await asyncio.sleep(5 * embed_attempt)
                 except Exception as embed_err:
                     if embed_attempt == 3:
                         raise
@@ -196,6 +207,8 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                             vr["vector_id"],
                             UUID(vr["chunk_id"]),
                         )
+        elif chunk_records:
+            logger.warning("Skipping embedding for manual %s — Qdrant not available", manual_id)
 
         # 7. Update status to 'ready'
         await _publish_progress(ctx, manual_id, "ready", page=page_count, total=page_count)
