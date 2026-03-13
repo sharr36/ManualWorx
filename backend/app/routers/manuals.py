@@ -217,12 +217,7 @@ async def retry_manual(manual_id: UUID, request: Request) -> ManualResponse:
     # Verify manual exists and belongs to tenant
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """
-            SELECT id, tenant_id, title, make, model, manual_type, total_pages,
-                   upload_status, visibility, original_pdf_url, created_at, updated_at
-            FROM manuals
-            WHERE id = $1 AND tenant_id = $2
-            """,
+            "SELECT id, upload_status FROM manuals WHERE id = $1 AND tenant_id = $2",
             manual_id,
             tenant_id,
         )
@@ -230,7 +225,7 @@ async def retry_manual(manual_id: UUID, request: Request) -> ManualResponse:
     if not row:
         raise HTTPException(status_code=404, detail="Manual not found")
 
-    if row["upload_status"] not in ("failed", "processing"):
+    if row["upload_status"] not in ("failed", "processing", "pending"):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot retry manual with status '{row['upload_status']}'"
@@ -257,21 +252,23 @@ async def retry_manual(manual_id: UUID, request: Request) -> ManualResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to enqueue retry: {e}")
 
-    # Re-fetch updated row
-    async with pool.acquire() as conn:
-        updated = await conn.fetchrow(
-            """
-            SELECT id, tenant_id, title, make, model, manual_type, total_pages,
-                   upload_status, visibility, original_pdf_url, created_at, updated_at
-            FROM manuals WHERE id = $1
-            """,
-            manual_id,
-        )
-
-    return ManualResponse(**{
-        k: str(v) if isinstance(v, UUID) else v.isoformat() if hasattr(v, 'isoformat') else v
-        for k, v in dict(updated).items()
-    })
+    # Re-fetch and return
+    result = await _service.get_manual(pool, tenant_id, manual_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Manual not found after retry")
+    # Only pass fields ManualResponse accepts (exclude extra keys like pages_processed)
+    return ManualResponse(
+        id=result["id"],
+        title=result["title"],
+        make=result.get("make"),
+        model=result.get("model"),
+        manual_type=result.get("manual_type"),
+        total_pages=result.get("total_pages"),
+        upload_status=result["upload_status"],
+        visibility=result.get("visibility"),
+        created_at=result["created_at"],
+        updated_at=result.get("updated_at"),
+    )
 
 
 @router.delete("/{manual_id}")
