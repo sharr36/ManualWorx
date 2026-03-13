@@ -53,7 +53,7 @@ async def on_startup(ctx: dict) -> None:
     for attempt in range(1, _DB_CONNECT_MAX_RETRIES + 1):
         try:
             ctx["pool"] = await asyncpg.create_pool(
-                dsn, min_size=2, max_size=10, ssl=use_ssl
+                dsn, min_size=1, max_size=3, command_timeout=30, ssl=use_ssl
             )
             break
         except (
