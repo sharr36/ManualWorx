@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ManualCard, type ProcessingProgress } from "@/components/manuals/manual-card";
 import { UploadDialog } from "@/components/manuals/upload-dialog";
+import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import type { Manual } from "@/types";
 
@@ -129,6 +130,19 @@ export default function ManualsPage() {
     return result;
   }, [manuals, filter, search]);
 
+  const handleRetry = useCallback(
+    async (manualId: string) => {
+      try {
+        await api.post(`/api/manuals/${manualId}/retry`);
+        toast.success("Manual re-queued for processing");
+        fetchManuals();
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : "Failed to retry");
+      }
+    },
+    [fetchManuals]
+  );
+
   const handleUploadSuccess = useCallback(
     (manual: Manual) => {
       setManuals((prev) => [manual, ...prev]);
@@ -185,6 +199,7 @@ export default function ManualsPage() {
               <ManualCard
                 manual={manual}
                 progress={progressMap[manual.id] ?? null}
+                onRetry={handleRetry}
               />
             </Link>
           ))}

@@ -139,6 +139,21 @@ export default function ManualDetailPage() {
     };
   }, [manual?.upload_status, manualId, apiBase]);
 
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      const updated = await api.post<ManualDetail>(`/api/manuals/${manualId}/retry`);
+      setManual(updated);
+      toast.success("Manual re-queued for processing");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to retry processing");
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!confirm("Delete this manual and all its data?")) return;
     try {
@@ -223,8 +238,23 @@ export default function ManualDetailPage() {
 
       {manual.upload_status === "failed" && (
         <Card className="border-red-200 bg-red-50">
-          <CardContent className="p-4 text-sm text-red-700">
-            Processing failed. Try re-uploading the manual.
+          <CardContent className="flex items-center justify-between p-4">
+            <span className="text-sm text-red-700">
+              Processing failed.
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRetry}
+              disabled={retrying}
+            >
+              {retrying ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-3.5 w-3.5" />
+              )}
+              Retry Processing
+            </Button>
           </CardContent>
         </Card>
       )}

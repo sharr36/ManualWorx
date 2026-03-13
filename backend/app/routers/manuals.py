@@ -204,6 +204,76 @@ async def get_page_image(manual_id: UUID, page_number: int, request: Request):
     return RedirectResponse(url=url, status_code=302)
 
 
+@router.post("/{manual_id}/retry")
+async def retry_manual(manual_id: UUID, request: Request) -> ManualResponse:
+    """Re-enqueue a failed or stuck manual for processing."""
+    role = getattr(request.state, "user_role", None)
+    if role not in (UserRole.OWNER, UserRole.MANAGER):
+        raise HTTPException(status_code=403, detail="Only owners and managers can retry processing")
+
+    pool = request.app.state.db_pool
+    tenant_id = request.state.tenant_id
+
+    # Verify manual exists and belongs to tenant
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, tenant_id, title, make, model, manual_type, total_pages,
+                   upload_status, visibility, original_pdf_url, created_at, updated_at
+            FROM manuals
+            WHERE id = $1 AND tenant_id = $2
+            """,
+            manual_id,
+            tenant_id,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    if row["upload_status"] not in ("failed", "processing"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry manual with status '{row['upload_status']}'"
+        )
+
+    # Clean up partial data from previous attempt
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM chunks WHERE page_id IN (SELECT id FROM pages WHERE manual_id = $1)", manual_id)
+        await conn.execute("DELETE FROM pages WHERE manual_id = $1", manual_id)
+        await conn.execute(
+            "UPDATE manuals SET upload_status = 'pending', total_pages = NULL, updated_at = NOW() WHERE id = $1",
+            manual_id,
+        )
+
+    # Re-enqueue the ingestion job
+    from arq.connections import create_pool as create_arq_pool
+    from manualworx_shared.config import arq_redis_settings
+    from ..config import settings
+
+    try:
+        arq_pool = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
+        await arq_pool.enqueue_job("ingest_manual", str(manual_id), str(tenant_id))
+        await arq_pool.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue retry: {e}")
+
+    # Re-fetch updated row
+    async with pool.acquire() as conn:
+        updated = await conn.fetchrow(
+            """
+            SELECT id, tenant_id, title, make, model, manual_type, total_pages,
+                   upload_status, visibility, original_pdf_url, created_at, updated_at
+            FROM manuals WHERE id = $1
+            """,
+            manual_id,
+        )
+
+    return ManualResponse(**{
+        k: str(v) if isinstance(v, UUID) else v.isoformat() if hasattr(v, 'isoformat') else v
+        for k, v in dict(updated).items()
+    })
+
+
 @router.delete("/{manual_id}")
 async def delete_manual(manual_id: UUID, request: Request) -> dict:
     """Delete a manual."""

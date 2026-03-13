@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 
 import asyncpg
 import boto3
@@ -17,6 +18,13 @@ from .tasks.generate_embeddings import generate_embeddings
 from .tasks.generate_learning_path import generate_learning_path
 from .tasks.ingest_manual import ingest_manual
 from .tasks.process_page import process_page
+
+# Configure logging so all messages are visible in fly logs
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    stream=sys.stdout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +61,7 @@ async def on_startup(ctx: dict) -> None:
             ConnectionRefusedError,
             OSError,
             asyncpg.InterfaceError,
+            asyncpg.PostgresError,
         ) as exc:
             if attempt == _DB_CONNECT_MAX_RETRIES:
                 raise

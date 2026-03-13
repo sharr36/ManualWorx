@@ -1,5 +1,6 @@
-import { BookOpen, Loader2 } from "lucide-react";
+import { BookOpen, Loader2, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { formatDate } from "@/lib/utils";
@@ -14,6 +15,7 @@ export interface ProcessingProgress {
 interface ManualCardProps {
   manual: Manual;
   progress?: ProcessingProgress | null;
+  onRetry?: (manualId: string) => void;
 }
 
 const statusColors: Record<string, string> = {
@@ -43,7 +45,7 @@ function computeProgressPercent(p: ProcessingProgress): number {
   return 0;
 }
 
-export function ManualCard({ manual, progress }: ManualCardProps) {
+export function ManualCard({ manual, progress, onRetry }: ManualCardProps) {
   const isProcessing =
     manual.upload_status === "processing" || manual.upload_status === "pending";
 
@@ -96,9 +98,25 @@ export function ManualCard({ manual, progress }: ManualCardProps) {
               >
                 {manual.upload_status}
               </Badge>
-              <span className="text-xs text-muted-foreground">
-                {formatDate(manual.created_at)}
-              </span>
+              {manual.upload_status === "failed" && onRetry ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onRetry(manual.id);
+                  }}
+                >
+                  <RefreshCw className="mr-1 h-3 w-3" />
+                  Retry
+                </Button>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  {formatDate(manual.created_at)}
+                </span>
+              )}
             </div>
           )}
         </div>
