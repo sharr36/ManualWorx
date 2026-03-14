@@ -4,7 +4,7 @@ import httpx
 
 from .base import EmbeddingProvider
 
-EMBED_DIMENSION = 768
+EMBED_DIMENSION = 1024
 
 
 class SelfHostedEmbeddingProvider(EmbeddingProvider):

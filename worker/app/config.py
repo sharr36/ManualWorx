@@ -28,7 +28,7 @@ class WorkerSettings(BaseSettings):
 
     # Vector
     COLLECTION_NAME: str = "manualworx_chunks"
-    EMBEDDING_DIMENSION: int = 768
+    EMBEDDING_DIMENSION: int = 1024
 
     # Classification
     CLASSIFICATION_MODEL: str = "claude-haiku-4-5-20251001"

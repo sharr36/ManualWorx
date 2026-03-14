@@ -5,8 +5,8 @@ import httpx
 from .base import EmbeddingProvider
 
 TOGETHER_EMBED_URL = "https://api.together.xyz/v1/embeddings"
-TOGETHER_MODEL = "BAAI/bge-base-en-v1.5"
-EMBED_DIMENSION = 768
+TOGETHER_MODEL = "intfloat/multilingual-e5-large-instruct"
+EMBED_DIMENSION = 1024
 
 
 class TogetherEmbeddingProvider(EmbeddingProvider):

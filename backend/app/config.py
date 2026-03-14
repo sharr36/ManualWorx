@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # Vector
     COLLECTION_NAME: str = "manualworx_chunks"
-    EMBEDDING_DIMENSION: int = 768
+    EMBEDDING_DIMENSION: int = 1024
 
     # App
     SECRET_KEY: str = _INSECURE_SECRET
