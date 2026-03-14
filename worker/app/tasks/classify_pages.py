@@ -26,6 +26,14 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
     bucket = ctx["bucket"]
     config = ctx["config"]
 
+    if not config.ANTHROPIC_API_KEY:
+        logger.error("ANTHROPIC_API_KEY not set — cannot run AI classification")
+        return {"status": "error", "error": "ANTHROPIC_API_KEY not configured"}
+
+    if not s3:
+        logger.error("S3 client not initialized — cannot fetch page images for classification")
+        return {"status": "error", "error": "S3 storage not configured"}
+
     classifier = PageClassifier(
         api_key=config.ANTHROPIC_API_KEY,
         model=config.CLASSIFICATION_MODEL,
@@ -66,8 +74,12 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
                 partial(s3.get_object, Bucket=bucket, Key=image_key),
             )
             image_bytes = response["Body"].read()
+            if len(image_bytes) < 100:
+                logger.warning("Page %d image suspiciously small (%d bytes): %s",
+                               page["page_number"], len(image_bytes), image_key)
         except Exception as e:
-            logger.warning("Failed to fetch page image %s: %s", image_key, e)
+            logger.error("Failed to fetch page %d image from S3 key '%s': %s: %s",
+                         page["page_number"], image_key, type(e).__name__, e)
             image_bytes = b""
 
         page_data_list.append({
@@ -122,6 +134,9 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
                 logger.warning("Failed to update Qdrant payload for page %s: %s", page_data["page_id"], e)
 
         updated += 1
+
+    logger.info("[%s] Classification complete: %d/%d pages updated",
+                manual_id[:8], updated, len(page_ids))
 
     return {
         "status": "completed",

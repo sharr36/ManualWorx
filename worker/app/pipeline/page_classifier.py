@@ -3,10 +3,13 @@
 import asyncio
 import base64
 import json
+import logging
 
 import anthropic
 
 from manualworx_shared.constants import PageClassification
+
+logger = logging.getLogger(__name__)
 
 
 CLASSIFICATION_PROMPT = """Classify this service manual page into exactly ONE of these categories:
@@ -37,8 +40,14 @@ class PageClassifier:
     """
 
     def __init__(self, api_key: str, model: str = "claude-haiku-4-5-20251001"):
+        if not api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY is required for AI page classification. "
+                "Set it via environment variable or fly secrets."
+            )
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = model
+        self._consecutive_failures = 0
 
     async def classify(self, page_image_bytes: bytes, page_text: str = "") -> str:
         """Classify a single page using Claude vision.
@@ -50,6 +59,11 @@ class PageClassifier:
         Returns:
             Classification string from PageClassification enum.
         """
+        if not page_image_bytes or len(page_image_bytes) < 100:
+            logger.warning("Empty or invalid image bytes (%d bytes), using heuristic",
+                           len(page_image_bytes) if page_image_bytes else 0)
+            return self._heuristic_classify(page_text)
+
         try:
             image_b64 = base64.b64encode(page_image_bytes).decode("utf-8")
             prompt = CLASSIFICATION_PROMPT.format(
@@ -78,6 +92,7 @@ class PageClassifier:
             )
 
             result = response.content[0].text.strip().lower()
+            self._consecutive_failures = 0
 
             # Validate against known classifications
             if result in VALID_CLASSIFICATIONS:
@@ -88,9 +103,18 @@ class PageClassifier:
                 if valid in result:
                     return valid
 
+            logger.warning("Claude returned unrecognized classification: %s", result)
             return self._heuristic_classify(page_text)
 
-        except Exception:
+        except anthropic.AuthenticationError:
+            logger.error("Anthropic API key is invalid — cannot classify pages")
+            raise  # Don't silently fall back on auth errors
+        except Exception as exc:
+            self._consecutive_failures += 1
+            logger.warning("Vision classification failed (%s: %s), using heuristic (failure #%d)",
+                           type(exc).__name__, exc, self._consecutive_failures)
+            if self._consecutive_failures >= 5:
+                logger.error("5+ consecutive classification failures — likely a systemic issue")
             return self._heuristic_classify(page_text)
 
     async def classify_batch(
