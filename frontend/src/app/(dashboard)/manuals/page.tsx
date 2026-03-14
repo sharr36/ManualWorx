@@ -88,6 +88,11 @@ export default function ManualsPage() {
       es.onerror = () => {
         es.close();
         currentSources.delete(manual.id);
+        // Retry SSE connection after a short delay
+        setTimeout(() => {
+          // Trigger re-subscription by refreshing manual list
+          fetchManuals();
+        }, 3000);
       };
 
       currentSources.set(manual.id, es);

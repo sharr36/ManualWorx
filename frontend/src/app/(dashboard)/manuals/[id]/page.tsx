@@ -129,6 +129,12 @@ export default function ManualDetailPage() {
           ]);
           setManual(m);
           setPages(p);
+          // Update progress display from polled data
+          if (m.upload_status === "processing") {
+            setProgressPage(p.length);
+            setProgressTotal(m.total_pages || 0);
+            if (!progressStage) setProgressStage("ocr");
+          }
           if (m.upload_status === "ready" || m.upload_status === "failed") {
             clearInterval(interval);
           }
@@ -222,9 +228,13 @@ export default function ManualDetailPage() {
             <div className="flex-1">
               <p className="text-sm font-medium">Processing manual...</p>
               <p className="text-xs text-muted-foreground">
-                {progressStage
-                  ? `Stage: ${progressStage} — page ${progressPage} of ${progressTotal || manual.total_pages || "?"}`
-                  : `${pages.length} of ${manual.total_pages || "?"} pages processed`}
+                {progressStage === "downloading" && "Downloading PDF..."}
+                {progressStage === "ocr" &&
+                  `${progressPage} of ${progressTotal || manual.total_pages || "?"} pages processed`}
+                {progressStage === "chunking" && "Chunking pages..."}
+                {progressStage === "embedding" && "Generating embeddings..."}
+                {!progressStage &&
+                  `${pages.length} of ${manual.total_pages || "?"} pages processed`}
               </p>
               {(progressTotal || manual.total_pages) && (progressTotal || (manual.total_pages ?? 0)) > 0 && (
                 <Progress
