@@ -270,6 +270,60 @@ async def retry_manual(manual_id: UUID, request: Request) -> ManualResponse:
     )
 
 
+@router.post("/{manual_id}/reclassify")
+async def reclassify_manual(manual_id: UUID, request: Request) -> dict:
+    """Re-run AI classification on all pages of a ready manual."""
+    role = getattr(request.state, "user_role", None)
+    if role not in (UserRole.OWNER, UserRole.MANAGER):
+        raise HTTPException(status_code=403, detail="Only owners and managers can reclassify")
+
+    pool = request.app.state.db_pool
+    tenant_id = request.state.tenant_id
+
+    # Verify manual exists, belongs to tenant, and is ready
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, upload_status FROM manuals WHERE id = $1 AND tenant_id = $2",
+            manual_id,
+            tenant_id,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    if row["upload_status"] != "ready":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Manual must be 'ready' to reclassify (current: '{row['upload_status']}')"
+        )
+
+    # Get all page IDs
+    async with pool.acquire() as conn:
+        page_rows = await conn.fetch(
+            "SELECT id FROM pages WHERE manual_id = $1 ORDER BY page_number",
+            manual_id,
+        )
+
+    if not page_rows:
+        raise HTTPException(status_code=400, detail="No pages to classify")
+
+    page_ids = [str(r["id"]) for r in page_rows]
+
+    # Enqueue the classify_pages job
+    from arq.connections import create_pool as create_arq_pool
+    from manualworx_shared.config import arq_redis_settings
+    from ..config import settings
+
+    try:
+        arq_pool = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
+        await arq_pool.enqueue_job("classify_pages", str(manual_id), page_ids)
+        await arq_pool.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue classification: {e}")
+
+    return {"status": "queued", "pages": len(page_ids)}
+
+
 @router.delete("/{manual_id}")
 async def delete_manual(manual_id: UUID, request: Request) -> dict:
     """Delete a manual."""

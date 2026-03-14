@@ -183,6 +183,33 @@ export default function ManualDetailPage() {
     }
   };
 
+  const [reclassifying, setReclassifying] = useState(false);
+
+  const handleReclassify = async () => {
+    setReclassifying(true);
+    try {
+      const result = await api.post<{ pages: number }>(`/api/manuals/${manualId}/reclassify`);
+      toast.success(`Reclassifying ${result.pages} pages with AI...`);
+      // Poll for updated classifications
+      const poll = setInterval(async () => {
+        try {
+          const p = await api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []);
+          setPages(p);
+          // Check if classifications have changed from mostly general_illustration
+          const giCount = p.filter((pg) => pg.classification === "general_illustration").length;
+          if (giCount < p.length * 0.8) {
+            clearInterval(poll);
+            toast.success("Reclassification complete");
+          }
+        } catch {}
+      }, 5000);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to start reclassification");
+    } finally {
+      setReclassifying(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!confirm("Delete this manual and all its data?")) return;
     try {
@@ -231,6 +258,21 @@ export default function ManualDetailPage() {
         <Badge className={statusColors[manual.upload_status] || "bg-slate-400"}>
           {manual.upload_status}
         </Badge>
+        {manual.upload_status === "ready" && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReclassify}
+            disabled={reclassifying}
+          >
+            {reclassifying ? (
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-3.5 w-3.5" />
+            )}
+            Reclassify
+          </Button>
+        )}
         <Button variant="ghost" size="icon" onClick={handleDelete}>
           <Trash2 className="h-4 w-4 text-red-500" />
         </Button>
