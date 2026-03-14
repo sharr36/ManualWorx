@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ComingSoon } from "@/components/ui/coming-soon";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -405,147 +406,17 @@ export default function ManualDetailPage() {
         </TabsContent>
 
         <TabsContent value="pages" className="mt-6">
-          {pages.length > 0 ? (
-            <div className="space-y-2">
-              {pages.map((page) => (
-                <Card key={page.id}>
-                  <CardContent className="flex items-start gap-4 p-4">
-                    {/* Page image thumbnail */}
-                    <button
-                      className="shrink-0 overflow-hidden rounded border bg-slate-100"
-                      onClick={() =>
-                        setExpandedImage(
-                          expandedImage === page.page_number ? null : page.page_number
-                        )
-                      }
-                      title="Click to expand"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
-                        alt={`Page ${page.page_number + 1}`}
-                        className="h-16 w-12 object-cover"
-                        loading="lazy"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="shrink-0">
-                          p.{page.page_number + 1}
-                        </Badge>
-                        <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">
-                          {classificationLabels[page.classification] || page.classification}
-                        </span>
-                        {page.has_table && (
-                          <Badge variant="outline" className="text-xs">
-                            Table
-                          </Badge>
-                        )}
-                        {page.has_diagram && (
-                          <Badge variant="outline" className="text-xs">
-                            Diagram
-                          </Badge>
-                        )}
-                      </div>
-                      {page.extracted_text && (
-                        <p className="mt-1 line-clamp-3 text-xs text-slate-600">
-                          {page.extracted_text}
-                        </p>
-                      )}
-                    </div>
-                  </CardContent>
-                  {/* Expanded image view */}
-                  {expandedImage === page.page_number && (
-                    <div className="border-t p-4">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
-                        alt={`Page ${page.page_number + 1} full`}
-                        className="mx-auto max-h-[70vh] rounded border shadow-sm"
-                      />
-                    </div>
-                  )}
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No pages processed yet.
-            </p>
-          )}
+          <PagesTab
+            pages={pages}
+            manualId={manualId}
+            apiBase={apiBase}
+            expandedImage={expandedImage}
+            setExpandedImage={setExpandedImage}
+          />
         </TabsContent>
 
         <TabsContent value="schematics" className="mt-6">
-          {(() => {
-            const diagramPages = pages.filter(
-              (p) =>
-                p.classification === "hydraulic_schematic" ||
-                p.classification === "electrical_diagram" ||
-                p.classification === "wiring_harness" ||
-                p.classification === "diagnostic_flowchart"
-            );
-            if (diagramPages.length === 0) {
-              return (
-                <p className="py-8 text-center text-sm text-muted-foreground">
-                  No schematics or diagrams detected in this manual.
-                </p>
-              );
-            }
-            return (
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  {diagramPages.length} schematic/diagram page{diagramPages.length !== 1 ? "s" : ""} detected.
-                  Open in the <a href="/viewer" className="text-emerald-600 underline">Viewer</a> for interactive annotations.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {diagramPages.map((page) => (
-                    <Card key={page.id}>
-                      <CardContent className="p-3">
-                        <button
-                          className="w-full overflow-hidden rounded border bg-slate-100"
-                          onClick={() =>
-                            setExpandedImage(
-                              expandedImage === page.page_number ? null : page.page_number
-                            )
-                          }
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
-                            alt={`Page ${page.page_number + 1}`}
-                            className="h-40 w-full object-contain"
-                            loading="lazy"
-                          />
-                        </button>
-                        <div className="mt-2 flex items-center gap-2">
-                          <Badge variant="secondary" className="text-[10px]">
-                            p.{page.page_number + 1}
-                          </Badge>
-                          <Badge variant="outline" className="text-[10px]">
-                            {classificationLabels[page.classification] || page.classification}
-                          </Badge>
-                        </div>
-                        {expandedImage === page.page_number && (
-                          <div className="mt-2">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
-                              alt={`Page ${page.page_number + 1} full`}
-                              className="max-h-[60vh] w-full rounded border object-contain"
-                            />
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
+          <SchematicsTab manualId={manualId} apiBase={apiBase} />
         </TabsContent>
 
         <TabsContent value="analysis" className="mt-6">
@@ -553,12 +424,7 @@ export default function ManualDetailPage() {
         </TabsContent>
 
         <TabsContent value="specs" className="mt-6">
-          <ComingSoon
-            icon={BookOpen}
-            feature="Extracted Specifications"
-            description="Auto-extracted torque specs, pressures, and part numbers from this manual."
-            phase={1}
-          />
+          <SpecsTab manualId={manualId} manualReady={manual.upload_status === "ready"} />
         </TabsContent>
       </Tabs>
     </div>
@@ -884,9 +750,535 @@ function AnalysisTab({ manualId, manualReady }: { manualId: string; manualReady:
       {/* Empty state for components */}
       {!loading && components.length === 0 && activeSection === "components" && !coverage && !gaps && (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          Click "Infer Components" to extract components from this manual.
+          Click &quot;Infer Components&quot; to extract components from this manual.
         </p>
       )}
+    </div>
+  );
+}
+
+/* ---------- Pages Tab with Search ---------- */
+
+interface SearchResult {
+  page_id: string;
+  page_number: number;
+  classification: string;
+  has_table: boolean;
+  has_diagram: boolean;
+  rank: number;
+  snippet: string;
+}
+
+function PagesTab({
+  pages,
+  manualId,
+  apiBase,
+  expandedImage,
+  setExpandedImage,
+}: {
+  pages: Page[];
+  manualId: string;
+  apiBase: string;
+  expandedImage: number | null;
+  setExpandedImage: (v: number | null) => void;
+}) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSearch = useCallback(
+    (query: string) => {
+      setSearchQuery(query);
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+      if (!query.trim()) {
+        setSearchResults(null);
+        return;
+      }
+      searchTimeout.current = setTimeout(async () => {
+        setSearching(true);
+        try {
+          const result = await api.get<{ results: SearchResult[] }>(
+            `/api/manuals/${manualId}/search?q=${encodeURIComponent(query.trim())}&limit=50`
+          );
+          setSearchResults(result.results);
+        } catch {
+          setSearchResults(null);
+        } finally {
+          setSearching(false);
+        }
+      }, 300);
+    },
+    [manualId]
+  );
+
+  const displayPages = searchResults
+    ? searchResults.map((sr) => {
+        const page = pages.find((p) => p.id === sr.page_id);
+        return { ...sr, page };
+      })
+    : null;
+
+  return (
+    <div className="space-y-3">
+      {/* Search bar */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Search all pages..."
+          value={searchQuery}
+          onChange={(e) => handleSearch(e.target.value)}
+          className="pl-10"
+        />
+        {searching && (
+          <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+        )}
+      </div>
+
+      {searchResults !== null && (
+        <p className="text-xs text-muted-foreground">
+          {searchResults.length} page{searchResults.length !== 1 ? "s" : ""} matching &quot;{searchQuery}&quot;
+        </p>
+      )}
+
+      {/* Search results or all pages */}
+      {displayPages ? (
+        displayPages.length > 0 ? (
+          <div className="space-y-2">
+            {displayPages.map((sr) => (
+              <Card key={sr.page_id}>
+                <CardContent className="flex items-start gap-4 p-4">
+                  <button
+                    className="shrink-0 overflow-hidden rounded border bg-slate-100"
+                    onClick={() =>
+                      setExpandedImage(expandedImage === sr.page_number ? null : sr.page_number)
+                    }
+                    title="Click to expand"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`${apiBase}/api/manuals/${manualId}/pages/${sr.page_number}/image`}
+                      alt={`Page ${sr.page_number + 1}`}
+                      className="h-16 w-12 object-cover"
+                      loading="lazy"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="shrink-0">p.{sr.page_number + 1}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {classificationLabels[sr.classification] || sr.classification}
+                      </span>
+                      <Badge variant="outline" className="text-[10px]">
+                        relevance: {(sr.rank * 100).toFixed(0)}%
+                      </Badge>
+                    </div>
+                    <p
+                      className="mt-1 text-xs text-slate-600"
+                      dangerouslySetInnerHTML={{ __html: sr.snippet }}
+                    />
+                  </div>
+                </CardContent>
+                {expandedImage === sr.page_number && (
+                  <div className="border-t p-4">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`${apiBase}/api/manuals/${manualId}/pages/${sr.page_number}/image`}
+                      alt={`Page ${sr.page_number + 1} full`}
+                      className="mx-auto max-h-[70vh] rounded border shadow-sm"
+                    />
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No pages match your search.
+          </p>
+        )
+      ) : pages.length > 0 ? (
+        <div className="space-y-2">
+          {pages.map((page) => (
+            <Card key={page.id}>
+              <CardContent className="flex items-start gap-4 p-4">
+                <button
+                  className="shrink-0 overflow-hidden rounded border bg-slate-100"
+                  onClick={() =>
+                    setExpandedImage(expandedImage === page.page_number ? null : page.page_number)
+                  }
+                  title="Click to expand"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                    alt={`Page ${page.page_number + 1}`}
+                    className="h-16 w-12 object-cover"
+                    loading="lazy"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="shrink-0">p.{page.page_number + 1}</Badge>
+                    <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">
+                      {classificationLabels[page.classification] || page.classification}
+                    </span>
+                    {page.has_table && <Badge variant="outline" className="text-xs">Table</Badge>}
+                    {page.has_diagram && <Badge variant="outline" className="text-xs">Diagram</Badge>}
+                  </div>
+                  {page.extracted_text && (
+                    <p className="mt-1 line-clamp-3 text-xs text-slate-600">{page.extracted_text}</p>
+                  )}
+                </div>
+              </CardContent>
+              {expandedImage === page.page_number && (
+                <div className="border-t p-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                    alt={`Page ${page.page_number + 1} full`}
+                    className="mx-auto max-h-[70vh] rounded border shadow-sm"
+                  />
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <p className="py-8 text-center text-sm text-muted-foreground">No pages processed yet.</p>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Schematics Tab with AI Annotations ---------- */
+
+interface SchematicEntry {
+  page_id: string;
+  page_number: number;
+  classification: string;
+  annotated: boolean;
+  diagram_type?: string;
+  component_count?: number;
+  connection_count?: number;
+  confidence?: number | null;
+  components?: { id: string; designator: string; name: string; type: string }[];
+  connections?: { from_id: string; to_id: string; line_type: string; label?: string }[];
+  operating_states?: { id: string; name: string; description: string }[];
+  annotated_at?: string | null;
+}
+
+function SchematicsTab({ manualId, apiBase }: { manualId: string; apiBase: string }) {
+  const [schematics, setSchematics] = useState<SchematicEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedSchematic, setExpandedSchematic] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const data = await api.get<{ schematics: SchematicEntry[] }>(
+          `/api/manuals/${manualId}/schematics`
+        );
+        setSchematics(data.schematics);
+      } catch {
+        setSchematics([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [manualId]);
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+
+  if (schematics.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        No schematics or diagrams detected in this manual.
+      </p>
+    );
+  }
+
+  const annotatedCount = schematics.filter((s) => s.annotated).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {schematics.length} schematic page{schematics.length !== 1 ? "s" : ""} detected
+          {annotatedCount > 0 && ` — ${annotatedCount} AI-annotated`}.
+          Open in the <a href="/viewer" className="text-emerald-600 underline">Viewer</a> for interactive mode.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {schematics.map((s) => (
+          <Card key={s.page_id} className={s.annotated ? "border-emerald-200" : ""}>
+            <CardContent className="p-3">
+              {/* Thumbnail */}
+              <button
+                className="w-full overflow-hidden rounded border bg-slate-100"
+                onClick={() => setExpandedSchematic(expandedSchematic === s.page_id ? null : s.page_id)}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`${apiBase}/api/manuals/${manualId}/pages/${s.page_number}/image`}
+                  alt={`Page ${s.page_number + 1}`}
+                  className="h-40 w-full object-contain"
+                  loading="lazy"
+                />
+              </button>
+
+              {/* Badges */}
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                <Badge variant="secondary" className="text-[10px]">p.{s.page_number + 1}</Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  {classificationLabels[s.classification] || s.classification}
+                </Badge>
+                {s.annotated && (
+                  <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">
+                    AI Annotated
+                  </Badge>
+                )}
+              </div>
+
+              {/* Annotation summary */}
+              {s.annotated && (
+                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  <div className="flex justify-between">
+                    <span>Components</span>
+                    <span className="font-medium text-foreground">{s.component_count}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Connections</span>
+                    <span className="font-medium text-foreground">{s.connection_count}</span>
+                  </div>
+                  {s.confidence != null && (
+                    <div className="flex justify-between">
+                      <span>Confidence</span>
+                      <span className="font-medium text-foreground">{Math.round(s.confidence * 100)}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Expanded: component list */}
+              {expandedSchematic === s.page_id && s.annotated && (
+                <div className="mt-3 space-y-2 border-t pt-3">
+                  {/* Full image */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`${apiBase}/api/manuals/${manualId}/pages/${s.page_number}/image`}
+                    alt={`Page ${s.page_number + 1} full`}
+                    className="max-h-[50vh] w-full rounded border object-contain"
+                  />
+
+                  {/* Components table */}
+                  {s.components && s.components.length > 0 && (
+                    <div>
+                      <h4 className="mb-1 text-xs font-semibold">Components</h4>
+                      <div className="max-h-40 overflow-y-auto rounded border text-xs">
+                        <table className="w-full">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="p-1.5 text-left font-medium">ID</th>
+                              <th className="p-1.5 text-left font-medium">Name</th>
+                              <th className="p-1.5 text-left font-medium">Type</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {s.components.map((c, i) => (
+                              <tr key={i} className="border-t">
+                                <td className="p-1.5 font-mono">{c.designator}</td>
+                                <td className="p-1.5">{c.name}</td>
+                                <td className="p-1.5 text-muted-foreground">{c.type}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Operating states */}
+                  {s.operating_states && s.operating_states.length > 0 && (
+                    <div>
+                      <h4 className="mb-1 text-xs font-semibold">Operating States</h4>
+                      <div className="space-y-1">
+                        {s.operating_states.map((os, i) => (
+                          <div key={i} className="rounded border p-2 text-xs">
+                            <span className="font-medium">{os.name}:</span>{" "}
+                            <span className="text-muted-foreground">{os.description}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Expand prompt for non-annotated */}
+              {expandedSchematic === s.page_id && !s.annotated && (
+                <div className="mt-3 border-t pt-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`${apiBase}/api/manuals/${manualId}/pages/${s.page_number}/image`}
+                    alt={`Page ${s.page_number + 1} full`}
+                    className="max-h-[50vh] w-full rounded border object-contain"
+                  />
+                  <p className="mt-2 text-center text-xs text-muted-foreground">
+                    AI annotation pending — use the Viewer for interactive analysis.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Specs Tab ---------- */
+
+interface ExtractedSpec {
+  category: string;
+  component: string;
+  spec: string;
+  conditions?: string;
+  page?: number;
+}
+
+const specCategoryColors: Record<string, string> = {
+  torque: "bg-blue-100 text-blue-800",
+  pressure: "bg-red-100 text-red-800",
+  clearance: "bg-amber-100 text-amber-800",
+  capacity: "bg-purple-100 text-purple-800",
+  electrical: "bg-yellow-100 text-yellow-800",
+  general: "bg-slate-100 text-slate-800",
+};
+
+function SpecsTab({ manualId, manualReady }: { manualId: string; manualReady: boolean }) {
+  const [specs, setSpecs] = useState<ExtractedSpec[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [extracted, setExtracted] = useState(false);
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+
+  const extractSpecs = async () => {
+    setLoading(true);
+    try {
+      const result = await api.post<{ specs: ExtractedSpec[]; total: number }>(
+        `/api/manuals/${manualId}/extract-specs`
+      );
+      setSpecs(result.specs || []);
+      setExtracted(true);
+      if (result.total === 0) {
+        toast.info("No specifications found in this manual");
+      } else {
+        toast.success(`Extracted ${result.total} specifications`);
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to extract specifications");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const categories = ["all", ...Array.from(new Set(specs.map((s) => s.category)))];
+  const filtered = filterCategory === "all" ? specs : specs.filter((s) => s.category === filterCategory);
+
+  if (!extracted) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-12">
+        <BookOpen className="h-12 w-12 text-muted-foreground" />
+        <div className="text-center">
+          <h3 className="font-semibold">Extract Specifications</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            AI will scan torque specs, pressures, clearances, and capacities from this manual.
+          </p>
+        </div>
+        <Button onClick={extractSpecs} disabled={loading || !manualReady}>
+          {loading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Zap className="mr-2 h-4 w-4" />
+          )}
+          {loading ? "Extracting..." : "Extract Specs"}
+        </Button>
+      </div>
+    );
+  }
+
+  if (specs.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        No specifications found in this manual.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Category filter */}
+      <div className="flex flex-wrap gap-2">
+        {categories.map((cat) => (
+          <Button
+            key={cat}
+            variant={filterCategory === cat ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilterCategory(cat)}
+          >
+            {cat === "all" ? `All (${specs.length})` : `${cat} (${specs.filter((s) => s.category === cat).length})`}
+          </Button>
+        ))}
+      </div>
+
+      {/* Specs table */}
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-slate-50">
+                <tr>
+                  <th className="p-3 text-left font-medium">Category</th>
+                  <th className="p-3 text-left font-medium">Component</th>
+                  <th className="p-3 text-left font-medium">Specification</th>
+                  <th className="p-3 text-left font-medium">Conditions</th>
+                  <th className="p-3 text-right font-medium">Page</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((spec, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="p-3">
+                      <Badge className={specCategoryColors[spec.category] || specCategoryColors.general}>
+                        {spec.category}
+                      </Badge>
+                    </td>
+                    <td className="p-3 font-medium">{spec.component}</td>
+                    <td className="p-3 font-mono text-xs">{spec.spec}</td>
+                    <td className="p-3 text-xs text-muted-foreground">{spec.conditions || "—"}</td>
+                    <td className="p-3 text-right text-xs text-muted-foreground">
+                      {spec.page != null ? `p.${spec.page}` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

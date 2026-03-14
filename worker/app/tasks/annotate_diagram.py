@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import time
+from uuid import UUID
 
 import anthropic
 
@@ -75,21 +76,22 @@ async def annotate_diagram(ctx: dict, page_id: str) -> dict:
     async with pool.acquire() as conn:
         page = await conn.fetchrow(
             """SELECT p.id, p.manual_id, p.page_number, p.classification,
-                      p.extracted_text, p.image_storage_key,
+                      p.extracted_text, p.image_url,
                       m.tenant_id
                FROM pages p
                JOIN manuals m ON m.id = p.manual_id
                WHERE p.id = $1""",
-            page_id,
+            UUID(page_id) if isinstance(page_id, str) else page_id,
         )
 
     if not page:
         return {"status": "error", "detail": "Page not found"}
 
     # 2. Fetch page image from storage
-    storage_key = page["image_storage_key"]
+    storage_key = page["image_url"]
     if not storage_key:
-        storage_key = f"manuals/{page['manual_id']}/pages/{page['page_number']}.png"
+        tenant_id = str(page["tenant_id"])
+        storage_key = f"manuals/{tenant_id}/{page['manual_id']}/pages/{page['page_number']}.png"
 
     try:
         obj = s3.get_object(Bucket=bucket, Key=storage_key)
@@ -183,8 +185,8 @@ async def annotate_diagram(ctx: dict, page_id: str) -> dict:
                  confidence_overall = EXCLUDED.confidence_overall,
                  generated_at = NOW()
                RETURNING id""",
-            str(page["tenant_id"]),
-            page_id,
+            page["tenant_id"],
+            UUID(page_id) if isinstance(page_id, str) else page_id,
             diagram_type,
             json.dumps(annotation_data),
             len(components),

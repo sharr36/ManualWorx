@@ -138,9 +138,31 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
     logger.info("[%s] Classification complete: %d/%d pages updated",
                 manual_id[:8], updated, len(page_ids))
 
+    # Auto-enqueue annotation for newly-classified schematic pages
+    schematic_types = {
+        "hydraulic_schematic", "electrical_diagram",
+        "wiring_harness", "diagnostic_flowchart",
+    }
+    newly_schematic = [
+        pd["page_id"] for pd, cls in zip(page_data_list, classifications)
+        if cls in schematic_types and pd["old_classification"] not in schematic_types
+    ]
+    if newly_schematic:
+        logger.info("[%s] Enqueuing annotation for %d newly-classified schematic pages",
+                    manual_id[:8], len(newly_schematic))
+        try:
+            from arq.connections import ArqRedis
+            arq_redis: ArqRedis | None = ctx.get("redis")
+            if arq_redis:
+                for pid in newly_schematic:
+                    await arq_redis.enqueue_job("annotate_diagram", pid)
+        except Exception as e:
+            logger.warning("Failed to enqueue schematic annotation: %s", e)
+
     return {
         "status": "completed",
         "manual_id": manual_id,
         "total": len(page_ids),
         "updated": updated,
+        "schematics_queued": len(newly_schematic),
     }

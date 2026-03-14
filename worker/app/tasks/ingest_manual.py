@@ -293,11 +293,33 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             except Exception as e:
                 logger.warning("Failed to enqueue classification job: %s", e)
 
+        # 9. Auto-annotate schematic pages with Claude Vision (non-blocking)
+        schematic_types = {
+            "hydraulic_schematic", "electrical_diagram",
+            "wiring_harness", "diagnostic_flowchart",
+        }
+        schematic_page_ids = [
+            p["page_id"] for p in pages_data
+            if p.get("classification") in schematic_types
+        ]
+        if schematic_page_ids:
+            logger.info("[%s] Enqueuing annotation for %d schematic pages",
+                        manual_id[:8], len(schematic_page_ids))
+            try:
+                from arq.connections import ArqRedis
+                arq_redis: ArqRedis | None = ctx.get("redis")
+                if arq_redis:
+                    for pid in schematic_page_ids:
+                        await arq_redis.enqueue_job("annotate_diagram", pid)
+            except Exception as e:
+                logger.warning("Failed to enqueue schematic annotation jobs: %s", e)
+
         return {
             "status": "ready",
             "manual_id": manual_id,
             "pages": page_count,
             "chunks": len(chunk_records),
+            "schematics_queued": len(schematic_page_ids),
         }
 
     except BaseException as e:

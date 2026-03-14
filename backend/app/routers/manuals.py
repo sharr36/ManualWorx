@@ -4,12 +4,13 @@ import asyncio
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 from ..models.manual import ManualDetailResponse, ManualResponse, PageResponse
 from ..services.manual_service import ManualService
 from manualworx_shared.constants import ManualType, UserRole, MAX_UPLOAD_BYTES
+from ..config import settings
 
 router = APIRouter(prefix="/api/manuals", tags=["manuals"])
 _service = ManualService()
@@ -322,6 +323,231 @@ async def reclassify_manual(manual_id: UUID, request: Request) -> dict:
         raise HTTPException(status_code=500, detail=f"Failed to enqueue classification: {e}")
 
     return {"status": "queued", "pages": len(page_ids)}
+
+
+@router.get("/{manual_id}/search")
+async def search_manual(
+    manual_id: UUID,
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=500),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict:
+    """Full-text search within a manual's pages and chunks."""
+    pool = request.app.state.db_pool
+    tenant_id = request.state.tenant_id
+
+    # Verify manual belongs to tenant
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM manuals WHERE id = $1 AND tenant_id = $2",
+            manual_id, tenant_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    # Full-text search with ts_rank scoring
+    async with pool.acquire() as conn:
+        results = await conn.fetch(
+            """
+            SELECT p.id AS page_id, p.page_number, p.classification, p.has_table, p.has_diagram,
+                   ts_rank_cd(to_tsvector('english', COALESCE(p.extracted_text, '')),
+                              plainto_tsquery('english', $2)) AS rank,
+                   ts_headline('english', COALESCE(p.extracted_text, ''),
+                               plainto_tsquery('english', $2),
+                               'StartSel=<mark>, StopSel=</mark>, MaxWords=60, MinWords=20') AS snippet
+            FROM pages p
+            WHERE p.manual_id = $1
+              AND to_tsvector('english', COALESCE(p.extracted_text, ''))
+                  @@ plainto_tsquery('english', $2)
+            ORDER BY rank DESC
+            LIMIT $3
+            """,
+            manual_id, q, limit,
+        )
+
+    return {
+        "query": q,
+        "total": len(results),
+        "results": [
+            {
+                "page_id": str(r["page_id"]),
+                "page_number": r["page_number"],
+                "classification": r["classification"],
+                "has_table": r["has_table"],
+                "has_diagram": r["has_diagram"],
+                "rank": float(r["rank"]),
+                "snippet": r["snippet"],
+            }
+            for r in results
+        ],
+    }
+
+
+@router.get("/{manual_id}/schematics")
+async def get_manual_schematics(manual_id: UUID, request: Request) -> dict:
+    """Get all schematic pages with their annotation data for the Schematics tab."""
+    pool = request.app.state.db_pool
+    tenant_id = request.state.tenant_id
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM manuals WHERE id = $1 AND tenant_id = $2",
+            manual_id, tenant_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT p.id AS page_id, p.page_number, p.classification, p.extracted_text,
+                   da.diagram_type, da.annotation_data, da.component_count,
+                   da.connection_count, da.operating_states, da.confidence_overall,
+                   da.generated_at AS annotated_at
+            FROM pages p
+            LEFT JOIN diagram_annotations da ON da.page_id = p.id
+            WHERE p.manual_id = $1
+              AND p.classification IN (
+                  'hydraulic_schematic', 'electrical_diagram',
+                  'wiring_harness', 'diagnostic_flowchart'
+              )
+            ORDER BY p.page_number
+            """,
+            manual_id,
+        )
+
+    schematics = []
+    for r in rows:
+        entry = {
+            "page_id": str(r["page_id"]),
+            "page_number": r["page_number"],
+            "classification": r["classification"],
+            "annotated": r["annotation_data"] is not None,
+        }
+        if r["annotation_data"] is not None:
+            ad = r["annotation_data"]
+            annotation = json.loads(ad) if isinstance(ad, str) else ad
+            os_data = r["operating_states"]
+            operating_states = (json.loads(os_data) if isinstance(os_data, str) else os_data) or []
+            entry.update({
+                "diagram_type": r["diagram_type"],
+                "component_count": r["component_count"],
+                "connection_count": r["connection_count"],
+                "confidence": float(r["confidence_overall"]) if r["confidence_overall"] else None,
+                "components": annotation.get("components", []),
+                "connections": annotation.get("connections", []),
+                "operating_states": operating_states,
+                "annotated_at": r["annotated_at"].isoformat() if r["annotated_at"] else None,
+            })
+        schematics.append(entry)
+
+    return {
+        "total": len(schematics),
+        "annotated": sum(1 for s in schematics if s["annotated"]),
+        "schematics": schematics,
+    }
+
+
+@router.post("/{manual_id}/extract-specs")
+async def extract_specs(manual_id: UUID, request: Request) -> dict:
+    """Extract specifications (torque, pressures, clearances) from manual pages using AI."""
+    pool = request.app.state.db_pool
+    tenant_id = request.state.tenant_id
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, make, model FROM manuals WHERE id = $1 AND tenant_id = $2",
+            manual_id, tenant_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    # Get pages likely to contain specs (torque tables, text pages with spec keywords)
+    async with pool.acquire() as conn:
+        spec_pages = await conn.fetch(
+            """
+            SELECT id, page_number, classification, extracted_text
+            FROM pages
+            WHERE manual_id = $1
+              AND extracted_text IS NOT NULL
+              AND (
+                classification = 'torque_spec_table'
+                OR (
+                  classification = 'text'
+                  AND (
+                    extracted_text ILIKE '%torque%'
+                    OR extracted_text ILIKE '%clearance%'
+                    OR extracted_text ILIKE '%pressure%'
+                    OR extracted_text ILIKE '%specification%'
+                    OR extracted_text ILIKE '%capacity%'
+                    OR extracted_text ILIKE '%tolerance%'
+                  )
+                )
+              )
+            ORDER BY page_number
+            LIMIT 30
+            """,
+            manual_id,
+        )
+
+    if not spec_pages:
+        return {"specs": [], "source_pages": []}
+
+    # Build combined text for AI extraction
+    combined_text = ""
+    source_pages = []
+    for p in spec_pages:
+        text = p["extracted_text"] or ""
+        if text.strip():
+            combined_text += f"\n--- Page {p['page_number'] + 1} ({p['classification']}) ---\n{text[:2000]}\n"
+            source_pages.append({"page_number": p["page_number"], "classification": p["classification"]})
+
+    if not combined_text.strip():
+        return {"specs": [], "source_pages": []}
+
+    # Use Claude to extract structured specs
+    import anthropic
+    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+    prompt = f"""Extract ALL technical specifications from this {row['make']} {row['model']} service manual text.
+
+Return a JSON array of specifications. Each spec should have:
+- "category": one of "torque", "pressure", "clearance", "capacity", "electrical", "general"
+- "component": what the spec applies to (e.g. "cylinder head bolts", "hydraulic system")
+- "spec": the value with units (e.g. "135 N·m (100 lb-ft)")
+- "conditions": any conditions or notes (e.g. "lubricated threads", "at operating temperature")
+- "page": the page number it came from
+
+Only include concrete numerical specifications. Do not infer values.
+
+TEXT:
+{combined_text[:12000]}
+
+Return ONLY a JSON array. No markdown, no explanation."""
+
+    try:
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text_result = response.content[0].text.strip()
+
+        # Parse JSON
+        start = text_result.find("[")
+        end = text_result.rfind("]") + 1
+        if start >= 0 and end > start:
+            specs = json.loads(text_result[start:end])
+        else:
+            specs = []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI extraction failed: {e}")
+
+    return {
+        "specs": specs,
+        "source_pages": source_pages,
+        "total": len(specs),
+    }
 
 
 @router.delete("/{manual_id}")
