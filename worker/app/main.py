@@ -90,6 +90,27 @@ async def on_startup(ctx: dict) -> None:
                         size=_config.EMBEDDING_DIMENSION, distance=Distance.COSINE
                     ),
                 )
+                logger.info(
+                    "Created Qdrant collection '%s' with dimension %d",
+                    _config.COLLECTION_NAME, _config.EMBEDDING_DIMENSION,
+                )
+            else:
+                # Verify dimension matches — if not, recreate
+                info = await client.get_collection(_config.COLLECTION_NAME)
+                current_dim = info.config.params.vectors.size
+                if current_dim != _config.EMBEDDING_DIMENSION:
+                    logger.warning(
+                        "Qdrant collection '%s' has dimension %d but expected %d — "
+                        "recreating collection (existing vectors will be lost)",
+                        _config.COLLECTION_NAME, current_dim, _config.EMBEDDING_DIMENSION,
+                    )
+                    await client.delete_collection(_config.COLLECTION_NAME)
+                    await client.create_collection(
+                        collection_name=_config.COLLECTION_NAME,
+                        vectors_config=VectorParams(
+                            size=_config.EMBEDDING_DIMENSION, distance=Distance.COSINE
+                        ),
+                    )
             ctx["qdrant"] = client
             break
         except Exception as exc:
@@ -134,6 +155,16 @@ async def on_startup(ctx: dict) -> None:
     # Embedding config
     ctx["together_api_key"] = _config.TOGETHER_API_KEY
     ctx["collection_name"] = _config.COLLECTION_NAME
+    if not _config.TOGETHER_API_KEY:
+        logger.warning(
+            "TOGETHER_API_KEY is not set — embedding will fail. "
+            "Set it via: fly secrets set TOGETHER_API_KEY=<key> --app <worker-app>"
+        )
+    else:
+        logger.info(
+            "Together.ai API key configured (starts with %s...)",
+            _config.TOGETHER_API_KEY[:8],
+        )
 
     # arq redis reference for enqueuing sub-jobs
     ctx["redis"] = ctx.get("redis")  # arq injects this automatically

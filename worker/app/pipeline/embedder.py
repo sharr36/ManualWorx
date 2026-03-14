@@ -33,6 +33,11 @@ class Embedder:
         max_chars = 2_000
         truncated = [t[:max_chars] if len(t) > max_chars else t for t in texts]
 
+        if not self.api_key:
+            raise ValueError(
+                "TOGETHER_API_KEY is empty — set it via fly secrets set TOGETHER_API_KEY=<key>"
+            )
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 TOGETHER_EMBED_URL,
@@ -41,8 +46,9 @@ class Embedder:
             )
             if resp.status_code != 200:
                 logger.error(
-                    "Together.ai embedding API error %d: %s",
+                    "Together.ai embedding API error %d (key starts with %s...): %s",
                     resp.status_code,
+                    self.api_key[:8] if self.api_key else "EMPTY",
                     resp.text[:500],
                 )
                 resp.raise_for_status()

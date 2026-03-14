@@ -78,6 +78,8 @@ class Settings(BaseSettings):
         warnings: list[str] = []
         if not self.ANTHROPIC_API_KEY:
             warnings.append("ANTHROPIC_API_KEY is not set — AI features will fail")
+        if not self.TOGETHER_API_KEY:
+            warnings.append("TOGETHER_API_KEY is not set — embedding/search will fail")
         if not self.STRIPE_SECRET_KEY:
             warnings.append("STRIPE_SECRET_KEY is not set — billing will be disabled")
         if self.SECRET_KEY == _INSECURE_SECRET:

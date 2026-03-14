@@ -1,8 +1,12 @@
 """Together.ai embedding provider."""
 
+import logging
+
 import httpx
 
 from .base import EmbeddingProvider
+
+logger = logging.getLogger(__name__)
 
 TOGETHER_EMBED_URL = "https://api.together.xyz/v1/embeddings"
 TOGETHER_MODEL = "intfloat/multilingual-e5-large-instruct"
@@ -20,12 +24,20 @@ class TogetherEmbeddingProvider(EmbeddingProvider):
         return results[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not self.api_key:
+            raise ValueError(
+                "TOGETHER_API_KEY is empty — set it in Fly.io secrets"
+            )
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 TOGETHER_EMBED_URL,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 json={"model": TOGETHER_MODEL, "input": texts},
             )
+            if resp.status_code != 200:
+                logger.error(
+                    "Together.ai API error %d: %s", resp.status_code, resp.text[:500]
+                )
             resp.raise_for_status()
             data = resp.json()
 
