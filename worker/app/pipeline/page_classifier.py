@@ -12,23 +12,24 @@ from manualworx_shared.constants import PageClassification
 logger = logging.getLogger(__name__)
 
 
-CLASSIFICATION_PROMPT = """Classify this service manual page into exactly ONE of these categories:
+CLASSIFICATION_PROMPT = """You are classifying pages from a heavy equipment service manual. Classify this page into exactly ONE category.
 
-- text: Primarily text content (procedures, descriptions, specifications written in paragraphs)
-- hydraulic_schematic: Hydraulic system diagram with flow lines, valves, pumps, cylinders
-- electrical_diagram: Electrical wiring diagram, circuit schematic
-- parts_exploded_view: Exploded parts diagram showing component assembly/disassembly
-- torque_spec_table: Table of torque specifications, clearances, or measurement values
-- diagnostic_flowchart: Troubleshooting flowchart or decision tree
-- wiring_harness: Wiring harness routing diagram or connector pinout
-- general_illustration: Photo, illustration, or diagram that doesn't fit other categories
+CLASSIFICATION RULES (apply in order):
+1. If the page is MOSTLY TEXT (procedures, instructions, descriptions, specifications, numbered steps, warnings, notes) — even if it has small diagrams, photos, or figures alongside the text — classify as "text". Most service manual pages are text.
+2. If the page shows a HYDRAULIC SYSTEM DIAGRAM with schematic symbols (flow lines, valves, pumps, cylinders, reservoirs) — classify as "hydraulic_schematic".
+3. If the page shows an ELECTRICAL/WIRING DIAGRAM with circuit symbols (wires, connectors, relays, fuses, ECM pinouts) — classify as "electrical_diagram".
+4. If the page shows an EXPLODED PARTS VIEW (assembly/disassembly diagram with numbered callouts pointing to individual parts, often with a parts list table) — classify as "parts_exploded_view".
+5. If the page contains a TABLE of torque specs, clearances, tolerances, or measurement values — classify as "torque_spec_table".
+6. If the page shows a TROUBLESHOOTING FLOWCHART or diagnostic decision tree — classify as "diagnostic_flowchart".
+7. If the page shows a WIRING HARNESS routing diagram or connector pinout table — classify as "wiring_harness".
+8. ONLY if the page is a FULL-PAGE photo or illustration with minimal text and doesn't fit categories 2-7, classify as "general_illustration".
 
-Consider both the image and the extracted text when classifying.
+IMPORTANT: Pages with text paragraphs AND small illustrations/figures are "text", NOT "general_illustration". The "general_illustration" category is ONLY for pages dominated by a single large image/photo with little to no readable text.
 
 EXTRACTED TEXT FROM THIS PAGE:
 {page_text}
 
-Respond with ONLY the classification label (e.g. "hydraulic_schematic"). No explanation."""
+Respond with ONLY the classification label. No explanation."""
 
 VALID_CLASSIFICATIONS = {c.value for c in PageClassification}
 
