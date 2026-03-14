@@ -14,8 +14,10 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  RotateCw,
   Server,
   Shield,
+  Terminal,
   Users,
   XCircle,
   Zap,
@@ -80,7 +82,7 @@ interface Migration {
   applied: boolean;
   applied_at: string | null;
   line_count: number;
-  preview: string;
+  sql: string;
 }
 
 interface HealthChecks {
@@ -544,7 +546,12 @@ function MigrationsTab() {
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [repairSql, setRepairSql] = useState("");
+  const [repairDesc, setRepairDesc] = useState("");
+  const [repairRunning, setRepairRunning] = useState(false);
+  const [repairResult, setRepairResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -563,7 +570,7 @@ function MigrationsTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const runMigrations = async () => {
+  const runAllPending = async () => {
     setRunning(true);
     try {
       const res = await api.post<{
@@ -586,81 +593,225 @@ function MigrationsTab() {
     }
   };
 
+  const applySingle = async (filename: string) => {
+    setActionLoading(filename);
+    try {
+      await api.post(`/api/superadmin/migrations/apply/${encodeURIComponent(filename)}`);
+      toast.success(`Applied: ${filename}`);
+      await load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : `Failed to apply ${filename}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const repairMigration = async (filename: string) => {
+    if (!confirm(`Re-run migration "${filename}"?\n\nThis will delete the tracking record and re-execute the SQL. Only safe if the migration uses IF NOT EXISTS / CREATE OR REPLACE patterns.`)) {
+      return;
+    }
+    setActionLoading(filename);
+    try {
+      await api.post(`/api/superadmin/migrations/repair/${encodeURIComponent(filename)}`);
+      toast.success(`Repaired: ${filename}`);
+      await load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : `Failed to repair ${filename}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const executeRepairSql = async () => {
+    if (!repairSql.trim()) return;
+    if (!confirm("Execute this SQL against the production database?\n\nThis action cannot be undone.")) {
+      return;
+    }
+    setRepairRunning(true);
+    setRepairResult(null);
+    try {
+      const res = await api.post<{ status: string; result: string; description: string }>(
+        "/api/superadmin/migrations/execute-sql",
+        { sql: repairSql, description: repairDesc }
+      );
+      setRepairResult(`Success: ${res.result}`);
+      toast.success("SQL executed successfully");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "SQL execution failed";
+      setRepairResult(`Error: ${msg}`);
+      toast.error(msg);
+    } finally {
+      setRepairRunning(false);
+    }
+  };
+
   if (loading) return <Skeleton className="h-64" />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Header + run all */}
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {migrations.length} migration files — {migrations.filter((m) => m.applied).length} applied,{" "}
-            {pendingCount} pending
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {migrations.length} migration files — {migrations.filter((m) => m.applied).length} applied,{" "}
+          {pendingCount} pending
+        </p>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={load}>
             <RefreshCw className="mr-2 h-3.5 w-3.5" />
             Refresh
           </Button>
           {pendingCount > 0 && (
-            <Button size="sm" onClick={runMigrations} disabled={running} variant="destructive">
+            <Button size="sm" onClick={runAllPending} disabled={running} variant="destructive">
               {running ? (
                 <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
               ) : (
                 <Play className="mr-2 h-3.5 w-3.5" />
               )}
-              Run {pendingCount} Pending Migration{pendingCount !== 1 ? "s" : ""}
+              Run All {pendingCount} Pending
             </Button>
           )}
         </div>
       </div>
 
+      {/* Migration list */}
       <div className="space-y-2">
-        {migrations.map((m) => (
-          <Card key={m.filename} className={!m.applied ? "border-amber-200 bg-amber-50/50" : ""}>
-            <CardContent className="p-0">
-              <button
-                className="flex w-full items-center gap-3 p-4 text-left"
-                onClick={() => setExpanded(expanded === m.filename ? null : m.filename)}
-              >
-                {m.applied ? (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-                ) : (
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-mono font-medium">{m.filename}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    ({m.line_count} lines)
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {m.applied ? (
-                    <Badge className="bg-emerald-100 text-emerald-800">
-                      Applied {m.applied_at ? new Date(m.applied_at).toLocaleDateString() : ""}
-                    </Badge>
-                  ) : (
-                    <Badge className="bg-amber-100 text-amber-800">Pending</Badge>
-                  )}
-                  {expanded === m.filename ? (
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </div>
-              </button>
+        {migrations.map((m) => {
+          const isExpanded = expanded === m.filename;
+          const isLoading = actionLoading === m.filename;
 
-              {expanded === m.filename && (
-                <div className="border-t bg-slate-950 p-4">
-                  <pre className="overflow-x-auto text-xs text-slate-300">
-                    <code>{m.preview}{m.preview.length >= 500 ? "\n\n... (truncated)" : ""}</code>
-                  </pre>
+          return (
+            <Card key={m.filename} className={!m.applied ? "border-amber-200 bg-amber-50/50" : ""}>
+              <CardContent className="p-0">
+                {/* Header row */}
+                <div className="flex items-center gap-3 p-4">
+                  <button
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    onClick={() => setExpanded(isExpanded ? null : m.filename)}
+                  >
+                    {m.applied ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <span className="text-sm font-mono font-medium">{m.filename}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        ({m.line_count} lines)
+                      </span>
+                    </div>
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+
+                  {/* Status + action buttons */}
+                  <div className="flex items-center gap-2">
+                    {m.applied ? (
+                      <>
+                        <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">
+                          Applied {m.applied_at ? new Date(m.applied_at).toLocaleDateString() : ""}
+                        </Badge>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isLoading}
+                          onClick={() => repairMigration(m.filename)}
+                          title="Re-run this migration (repair)"
+                        >
+                          {isLoading ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <RotateCw className="mr-1 h-3 w-3" />
+                          )}
+                          Repair
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Badge className="bg-amber-100 text-amber-800 text-[10px]">Pending</Badge>
+                        <Button
+                          size="sm"
+                          disabled={isLoading}
+                          onClick={() => applySingle(m.filename)}
+                        >
+                          {isLoading ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <Play className="mr-1 h-3 w-3" />
+                          )}
+                          Apply
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+
+                {/* Expanded SQL view */}
+                {isExpanded && (
+                  <div className="border-t bg-slate-950 p-4">
+                    <pre className="max-h-[400px] overflow-auto text-xs text-slate-300">
+                      <code>{m.sql}</code>
+                    </pre>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
+
+      {/* Repair SQL Console */}
+      <Card className="border-red-200">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Terminal className="h-4 w-4 text-red-500" />
+            <h3 className="font-semibold text-sm">Repair SQL Console</h3>
+            <Badge variant="destructive" className="text-[10px]">Caution</Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Execute ad-hoc SQL for emergency repairs. Blocks DROP DATABASE, schema drops,
+            and _migrations table manipulation.
+          </p>
+          <div className="space-y-3">
+            <input
+              type="text"
+              placeholder="Description (what this fix does)"
+              value={repairDesc}
+              onChange={(e) => setRepairDesc(e.target.value)}
+              className="w-full rounded border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <textarea
+              placeholder="-- Enter repair SQL here&#10;ALTER TABLE pages ADD COLUMN IF NOT EXISTS new_col TEXT;"
+              value={repairSql}
+              onChange={(e) => setRepairSql(e.target.value)}
+              rows={6}
+              className="w-full rounded border bg-slate-950 px-3 py-2 font-mono text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+            <div className="flex items-center justify-between">
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={repairRunning || !repairSql.trim()}
+                onClick={executeRepairSql}
+              >
+                {repairRunning ? (
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Zap className="mr-2 h-3.5 w-3.5" />
+                )}
+                Execute SQL
+              </Button>
+              {repairResult && (
+                <span className={`text-xs font-mono ${repairResult.startsWith("Error") ? "text-red-500" : "text-emerald-500"}`}>
+                  {repairResult}
+                </span>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

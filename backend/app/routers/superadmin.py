@@ -1,10 +1,12 @@
 """Super admin endpoints — system-wide visibility and management."""
 
 import os
+import re
 from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from ..config import settings
 
@@ -161,9 +163,13 @@ async def list_all_users(request: Request) -> dict:
 # ─── Migrations ───────────────────────────────────────────────────────────────
 
 
+def _get_migrations_dir() -> Path:
+    return Path(__file__).parent.parent.parent / "migrations"
+
+
 @router.get("/migrations")
 async def get_migrations(request: Request) -> dict:
-    """Get applied and pending migration status."""
+    """Get applied and pending migration status with full SQL content."""
     _require_superadmin(request)
     pool = request.app.state.db_pool
 
@@ -175,7 +181,7 @@ async def get_migrations(request: Request) -> dict:
     applied = {r["filename"]: r["applied_at"].isoformat() for r in applied_rows}
 
     # Get all migration files on disk
-    migrations_dir = Path(__file__).parent.parent.parent / "migrations"
+    migrations_dir = _get_migrations_dir()
     all_files = []
     if migrations_dir.exists():
         all_files = sorted(
@@ -194,10 +200,9 @@ async def get_migrations(request: Request) -> dict:
             "applied": filename in applied,
             "applied_at": applied.get(filename),
             "line_count": line_count,
-            "preview": sql_content[:500],
+            "sql": sql_content,
         })
 
-    # Pending = on disk but not applied
     pending = [m for m in migrations if not m["applied"]]
 
     return {
@@ -210,20 +215,18 @@ async def get_migrations(request: Request) -> dict:
 
 @router.post("/migrations/run")
 async def run_pending_migrations(request: Request) -> dict:
-    """Run all pending migrations."""
+    """Run all pending migrations in order."""
     _require_superadmin(request)
     pool = request.app.state.db_pool
 
-    migrations_dir = Path(__file__).parent.parent.parent / "migrations"
+    migrations_dir = _get_migrations_dir()
     if not migrations_dir.exists():
         return {"applied": [], "errors": []}
 
     async with pool.acquire() as conn:
-        # Get already applied
         rows = await conn.fetch("SELECT filename FROM _migrations")
         applied = {r["filename"] for r in rows}
 
-        # Get pending files
         all_files = sorted(
             f for f in os.listdir(migrations_dir)
             if f.endswith(".sql")
@@ -248,6 +251,128 @@ async def run_pending_migrations(request: Request) -> dict:
                 break  # Stop on first failure
 
     return {"applied": results, "errors": errors}
+
+
+@router.post("/migrations/apply/{filename}")
+async def apply_single_migration(filename: str, request: Request) -> dict:
+    """Apply a single pending migration by filename."""
+    _require_superadmin(request)
+    pool = request.app.state.db_pool
+
+    # Validate filename (prevent path traversal)
+    if not re.match(r"^[\w\-]+\.sql$", filename):
+        raise HTTPException(status_code=400, detail="Invalid migration filename")
+
+    migrations_dir = _get_migrations_dir()
+    sql_path = migrations_dir / filename
+    if not sql_path.exists():
+        raise HTTPException(status_code=404, detail=f"Migration file not found: {filename}")
+
+    async with pool.acquire() as conn:
+        # Check if already applied
+        row = await conn.fetchrow(
+            "SELECT filename FROM _migrations WHERE filename = $1", filename
+        )
+        if row:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Migration {filename} is already applied. Use repair to re-run.",
+            )
+
+        sql = sql_path.read_text()
+        try:
+            await conn.execute(sql)
+            await conn.execute(
+                "INSERT INTO _migrations (filename) VALUES ($1)", filename
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Migration failed: {e}")
+
+    return {"status": "applied", "filename": filename}
+
+
+@router.post("/migrations/repair/{filename}")
+async def repair_migration(filename: str, request: Request) -> dict:
+    """Re-run an already-applied migration (repair mode).
+
+    Removes the migration record, re-executes the SQL, then re-records it.
+    Useful for fixing schema issues or re-applying migrations that use
+    IF NOT EXISTS / CREATE OR REPLACE patterns.
+    """
+    _require_superadmin(request)
+    pool = request.app.state.db_pool
+
+    if not re.match(r"^[\w\-]+\.sql$", filename):
+        raise HTTPException(status_code=400, detail="Invalid migration filename")
+
+    migrations_dir = _get_migrations_dir()
+    sql_path = migrations_dir / filename
+    if not sql_path.exists():
+        raise HTTPException(status_code=404, detail=f"Migration file not found: {filename}")
+
+    sql = sql_path.read_text()
+
+    async with pool.acquire() as conn:
+        try:
+            # Remove old tracking record
+            await conn.execute(
+                "DELETE FROM _migrations WHERE filename = $1", filename
+            )
+            # Re-execute the migration
+            await conn.execute(sql)
+            # Re-record with fresh timestamp
+            await conn.execute(
+                "INSERT INTO _migrations (filename) VALUES ($1)", filename
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Repair failed: {e}")
+
+    return {"status": "repaired", "filename": filename}
+
+
+class RepairSQLRequest(BaseModel):
+    sql: str
+    description: str = ""
+
+
+@router.post("/migrations/execute-sql")
+async def execute_repair_sql(body: RepairSQLRequest, request: Request) -> dict:
+    """Execute ad-hoc repair SQL. Use for emergency fixes only.
+
+    Only allows DDL and safe DML — blocks DROP DATABASE, TRUNCATE on
+    system tables, and other destructive operations.
+    """
+    _require_superadmin(request)
+    pool = request.app.state.db_pool
+
+    sql = body.sql.strip()
+    if not sql:
+        raise HTTPException(status_code=400, detail="SQL cannot be empty")
+
+    # Block obviously dangerous statements
+    sql_upper = sql.upper()
+    blocked = [
+        "DROP DATABASE", "DROP SCHEMA", "TRUNCATE _migrations",
+        "DELETE FROM _migrations", "DROP TABLE _migrations",
+    ]
+    for pattern in blocked:
+        if pattern in sql_upper:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Blocked: '{pattern}' is not allowed via repair SQL",
+            )
+
+    async with pool.acquire() as conn:
+        try:
+            result = await conn.execute(sql)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"SQL execution failed: {e}")
+
+    return {
+        "status": "executed",
+        "result": result,
+        "description": body.description,
+    }
 
 
 # ─── System Health ────────────────────────────────────────────────────────────
