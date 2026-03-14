@@ -14,8 +14,13 @@ from ..database import set_tenant_context
 
 COVERAGE_ANALYSIS_PROMPT = """Analyze the documentation available for the "{system_area}" system on a {machine_model} machine.
 
-Available pages:
-{page_summary}
+Total pages: {total_pages}
+
+Classification breakdown:
+{classification_breakdown}
+
+Sample pages with text content:
+{page_samples}
 
 Determine what documentation exists and what is missing. Return JSON:
 {{
@@ -165,13 +170,27 @@ class InferenceService:
                 "page_count": 0,
             }
 
-        # Build page summary for AI
-        page_summary = "\n".join(
-            f"Page {p['page_number']+1} [{p['classification']}]"
-            + (" [has table]" if p["has_table"] else "")
-            + (" [has diagram]" if p["has_diagram"] else "")
-            + f": {p['text_preview'] or 'no text'}"
-            for p in pages
+        # Build classification breakdown
+        from collections import Counter
+        class_counts = Counter(p["classification"] for p in pages)
+        classification_breakdown = "\n".join(
+            f"- {cls}: {count} pages" for cls, count in class_counts.most_common()
+        )
+
+        # Sample a few pages from each classification type for context
+        samples_by_class: dict[str, list[str]] = {}
+        for p in pages:
+            cls = p["classification"]
+            if cls not in samples_by_class:
+                samples_by_class[cls] = []
+            if len(samples_by_class[cls]) < 3 and p["text_preview"]:
+                samples_by_class[cls].append(
+                    f"  Page {p['page_number']+1}: {p['text_preview']}"
+                )
+        page_samples = "\n".join(
+            f"[{cls}]\n" + "\n".join(samples)
+            for cls, samples in samples_by_class.items()
+            if samples
         )
 
         machine_model = f"{manual['make'] or ''} {manual['model'] or ''}".strip() or "unknown"
@@ -179,7 +198,9 @@ class InferenceService:
         prompt = COVERAGE_ANALYSIS_PROMPT.format(
             system_area=system_area or "general",
             machine_model=machine_model,
-            page_summary=page_summary[:6000],
+            total_pages=len(pages),
+            classification_breakdown=classification_breakdown,
+            page_samples=page_samples[:4000],
         )
 
         response = await self.client.messages.create(

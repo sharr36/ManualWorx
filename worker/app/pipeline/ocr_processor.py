@@ -177,34 +177,79 @@ async def _run_page_in_process(loop, pdf_bytes: bytes, page_number: int, dpi: in
         q.close()
 
 
+_PARTS_KEYWORDS = re.compile(
+    r"(part\s*no|part\s*number|item\s*\d|qty|quantity|ref\.?\s*no)", re.I
+)
+
+
 def _classify_page(text: str, has_table: bool, has_diagram: bool) -> str:
     """Classify a page based on content heuristics."""
-    if not text.strip():
+    text_stripped = text.strip()
+    text_lower = text_stripped.lower()
+    text_len = len(text_stripped)
+
+    # Very little or no text — classify based on diagram presence
+    if text_len < 20:
         if has_diagram:
             return "general_illustration"
         return "text"
 
+    # Tables with torque/spec patterns
     if has_table and _TABLE_PATTERNS.search(text):
         return "torque_spec_table"
 
+    # Count keyword matches for hydraulic and electrical
+    hydraulic_hits = len(_SCHEMATIC_KEYWORDS.findall(text))
+    electrical_hits = len(_ELECTRICAL_KEYWORDS.findall(text))
+
+    # Hydraulic schematics — diagrams with hydraulic terms, or short text pages
+    # heavily dominated by hydraulic vocabulary
     if _SCHEMATIC_KEYWORDS.search(text) and has_diagram:
         return "hydraulic_schematic"
+    if hydraulic_hits >= 3 and text_len < 800:
+        return "hydraulic_schematic"
 
+    # Electrical diagrams
     if _ELECTRICAL_KEYWORDS.search(text) and has_diagram:
         return "electrical_diagram"
+    if electrical_hits >= 3 and text_len < 800:
+        return "electrical_diagram"
 
+    # Diagnostic flowcharts
     if re.search(r"(troubleshoot|diagnostic|fault|error\s*code)", text, re.I):
         if has_diagram:
             return "diagnostic_flowchart"
+        # Text-heavy troubleshooting pages
+        if re.search(r"(cause|remedy|solution|symptom|check)", text, re.I):
+            return "diagnostic_flowchart"
 
-    if re.search(r"(part\s*no|part\s*number|item\s*\d|qty)", text, re.I):
+    # Parts exploded views — pages with part numbers, item lists, qty columns
+    if _PARTS_KEYWORDS.search(text):
         if has_diagram:
             return "parts_exploded_view"
+        # Tables with part numbers are parts lists even without diagrams
+        if has_table:
+            return "parts_exploded_view"
 
+    # Wiring harness
     if _ELECTRICAL_KEYWORDS.search(text) and not has_diagram:
         return "wiring_harness"
 
+    # Diagrams with figure references
     if has_diagram and _DIAGRAM_KEYWORDS.search(text):
+        # Try to determine type from surrounding text
+        if hydraulic_hits > electrical_hits:
+            return "hydraulic_schematic"
+        if electrical_hits > hydraulic_hits:
+            return "electrical_diagram"
+        return "general_illustration"
+
+    # Short text on diagram pages — likely a schematic with labels
+    if has_diagram and text_len < 200:
+        if hydraulic_hits > 0:
+            return "hydraulic_schematic"
+        if electrical_hits > 0:
+            return "electrical_diagram"
         return "general_illustration"
 
     return "text"

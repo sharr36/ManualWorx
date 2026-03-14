@@ -132,6 +132,7 @@ class PageClassifier:
             return PageClassification.GENERAL_ILLUSTRATION
 
         text_lower = text.lower()
+        text_len = len(text.strip())
         lines = text.strip().split("\n")
 
         # Check for table patterns (multiple columns of numbers)
@@ -143,25 +144,33 @@ class PageClassifier:
             if any(w in text_lower for w in ("torque", "n·m", "ft-lb", "nm", "lb-ft")):
                 return PageClassification.TORQUE_SPEC_TABLE
 
-        # Check for flowchart indicators
+        # Check for flowchart / troubleshooting indicators
+        if any(w in text_lower for w in ("troubleshoot", "diagnostic", "fault", "error code")):
+            return PageClassification.DIAGNOSTIC_FLOWCHART
         if any(w in text_lower for w in ("yes", "no", "check", "verify", "does")) and \
                 text_lower.count("?") >= 2:
             return PageClassification.DIAGNOSTIC_FLOWCHART
 
-        # Check for hydraulic terms
-        hydraulic_terms = ("hydraulic", "valve", "pump", "cylinder", "psi", "bar", "flow")
-        if sum(1 for t in hydraulic_terms if t in text_lower) >= 3:
-            if len(text) < 500:
-                return PageClassification.HYDRAULIC_SCHEMATIC
+        # Count keyword matches
+        hydraulic_terms = ("hydraulic", "valve", "pump", "cylinder", "psi", "bar", "flow",
+                          "schematic", "circuit")
+        hydraulic_hits = sum(1 for t in hydraulic_terms if t in text_lower)
 
-        # Check for electrical terms
-        electrical_terms = ("wire", "connector", "pin", "circuit", "voltage", "amp", "fuse")
-        if sum(1 for t in electrical_terms if t in text_lower) >= 3:
-            if len(text) < 500:
-                return PageClassification.ELECTRICAL_DIAGRAM
+        electrical_terms = ("wire", "connector", "pin", "circuit", "voltage", "amp", "fuse",
+                          "relay", "solenoid", "ECM")
+        electrical_hits = sum(1 for t in electrical_terms if t in text_lower)
+
+        # Hydraulic schematics — even 1-2 hits on short pages suggest a schematic
+        if hydraulic_hits >= 2 or (hydraulic_hits >= 1 and text_len < 500):
+            return PageClassification.HYDRAULIC_SCHEMATIC
+
+        # Electrical diagrams
+        if electrical_hits >= 2 or (electrical_hits >= 1 and text_len < 500):
+            return PageClassification.ELECTRICAL_DIAGRAM
 
         # Check for parts list
-        if any(w in text_lower for w in ("part number", "part no", "qty", "exploded")):
+        if any(w in text_lower for w in ("part number", "part no", "qty", "exploded",
+                                          "item no", "ref no", "quantity")):
             return PageClassification.PARTS_EXPLODED_VIEW
 
         # Check for wiring harness
