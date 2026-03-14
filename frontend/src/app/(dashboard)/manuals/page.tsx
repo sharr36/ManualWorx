@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BookOpen, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,7 @@ export default function ManualsPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterType>("All");
-  const [progressMap, setProgressMap] = useState<Record<string, ProcessingProgress>>({});
-  const eventSourcesRef = useRef<Map<string, EventSource>>(new Map());
+  const [progressMap] = useState<Record<string, ProcessingProgress>>({});
 
   const fetchManuals = useCallback(async () => {
     try {
@@ -38,83 +37,14 @@ export default function ManualsPage() {
     fetchManuals();
   }, [fetchManuals]);
 
-  // Subscribe to SSE for each processing/pending manual
-  useEffect(() => {
-    const processingManuals = manuals.filter(
-      (m) => m.upload_status === "processing" || m.upload_status === "pending"
-    );
-    const processingIds = new Set(processingManuals.map((m) => m.id));
-    const currentSources = eventSourcesRef.current;
-
-    // Close SSE for manuals no longer processing
-    for (const [id, es] of currentSources) {
-      if (!processingIds.has(id)) {
-        es.close();
-        currentSources.delete(id);
-      }
-    }
-
-    // Open SSE for newly processing manuals
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
-    for (const manual of processingManuals) {
-      if (currentSources.has(manual.id)) continue;
-
-      const es = new EventSource(
-        `${apiBase}/api/manuals/${manual.id}/progress`,
-        { withCredentials: true }
-      );
-
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          const { stage, page, total } = data;
-
-          setProgressMap((prev) => ({
-            ...prev,
-            [manual.id]: { stage, page, total },
-          }));
-
-          if (stage === "ready" || stage === "failed") {
-            es.close();
-            currentSources.delete(manual.id);
-            // Refresh manual list to get updated status
-            fetchManuals();
-          }
-        } catch {
-          // skip malformed events
-        }
-      };
-
-      es.onerror = () => {
-        es.close();
-        currentSources.delete(manual.id);
-        // Retry SSE connection after a short delay
-        setTimeout(() => {
-          // Trigger re-subscription by refreshing manual list
-          fetchManuals();
-        }, 3000);
-      };
-
-      currentSources.set(manual.id, es);
-    }
-
-    return () => {
-      // Cleanup on unmount
-      for (const [, es] of currentSources) {
-        es.close();
-      }
-      currentSources.clear();
-    };
-  }, [manuals, fetchManuals]);
-
-  // Fallback polling for manuals that might not get SSE
+  // Poll for progress while any manual is processing
   useEffect(() => {
     const hasProcessing = manuals.some(
       (m) => m.upload_status === "processing" || m.upload_status === "pending"
     );
     if (!hasProcessing) return;
 
-    const interval = setInterval(fetchManuals, 5000);
+    const interval = setInterval(fetchManuals, 3000);
     return () => clearInterval(interval);
   }, [manuals, fetchManuals]);
 

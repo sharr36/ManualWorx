@@ -59,7 +59,6 @@ export default function ManualDetailPage() {
   const [progressPage, setProgressPage] = useState(0);
   const [progressTotal, setProgressTotal] = useState(0);
   const [expandedImage, setExpandedImage] = useState<number | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -84,6 +83,7 @@ export default function ManualDetailPage() {
 
   // SSE progress stream while processing
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sseActiveRef = useRef(false);
 
   useEffect(() => {
     if (
@@ -92,35 +92,9 @@ export default function ManualDetailPage() {
     )
       return;
 
-    const es = new EventSource(
-      `${apiBase}/api/manuals/${manualId}/progress`,
-      { withCredentials: true }
-    );
-    eventSourceRef.current = es;
-
-    es.onmessage = async (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setProgressStage(data.stage || "");
-        setProgressPage(data.page || 0);
-        setProgressTotal(data.total || 0);
-
-        if (data.stage === "ready" || data.stage === "failed") {
-          es.close();
-          // Refresh full data
-          const [m, p] = await Promise.all([
-            api.get<ManualDetail>(`/api/manuals/${manualId}`),
-            api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []),
-          ]);
-          setManual(m);
-          setPages(p);
-        }
-      } catch {}
-    };
-
-    es.onerror = () => {
-      // Fallback to polling if SSE fails
-      es.close();
+    // Always start polling immediately — SSE is unreliable on Fly.io
+    const startPolling = () => {
+      if (pollingRef.current) return; // already polling
       const interval = setInterval(async () => {
         try {
           const [m, p] = await Promise.all([
@@ -129,22 +103,64 @@ export default function ManualDetailPage() {
           ]);
           setManual(m);
           setPages(p);
-          // Update progress display from polled data
-          if (m.upload_status === "processing") {
+          // Update progress display from polled data (unless SSE is active)
+          if (!sseActiveRef.current && m.upload_status === "processing") {
             setProgressPage(p.length);
             setProgressTotal(m.total_pages || 0);
-            if (!progressStage) setProgressStage("ocr");
+            setProgressStage("ocr");
           }
           if (m.upload_status === "ready" || m.upload_status === "failed") {
             clearInterval(interval);
+            pollingRef.current = null;
           }
         } catch {}
       }, 3000);
       pollingRef.current = interval;
     };
 
+    startPolling();
+
+    // Also try SSE for faster updates — but don't depend on it
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(
+        `${apiBase}/api/manuals/${manualId}/progress`,
+        { withCredentials: true }
+      );
+      es.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          sseActiveRef.current = true;
+          setProgressStage(data.stage || "");
+          setProgressPage(data.page || 0);
+          setProgressTotal(data.total || 0);
+
+          if (data.stage === "ready" || data.stage === "failed") {
+            es?.close();
+            sseActiveRef.current = false;
+            // Refresh full data
+            const [m, p] = await Promise.all([
+              api.get<ManualDetail>(`/api/manuals/${manualId}`),
+              api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []),
+            ]);
+            setManual(m);
+            setPages(p);
+          }
+        } catch {}
+      };
+
+      es.onerror = () => {
+        es?.close();
+        sseActiveRef.current = false;
+        // Polling is already running — no action needed
+      };
+    } catch {
+      // SSE not supported or blocked — polling handles it
+    }
+
     return () => {
-      es.close();
+      es?.close();
+      sseActiveRef.current = false;
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
         pollingRef.current = null;
