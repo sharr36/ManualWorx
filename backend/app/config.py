@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     SYMBOL_LIBRARY_PATH: str = "/app/assets/symbols/"
     ANNOTATION_CACHE_TTL: int = 86400
 
+    # Super Admin
+    SUPERADMIN_EMAILS: str = ""  # comma-separated emails with superadmin access
+
     @model_validator(mode="after")
     def _validate_critical_settings(self) -> "Settings":
         """Warn on missing critical config; fail on insecure SECRET_KEY in production."""
@@ -93,6 +96,12 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+
+    @property
+    def superadmin_email_set(self) -> set[str]:
+        if not self.SUPERADMIN_EMAILS:
+            return set()
+        return {e.strip().lower() for e in self.SUPERADMIN_EMAILS.split(",") if e.strip()}
 
     class Config:
         env_file = ".env"

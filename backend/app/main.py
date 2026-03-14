@@ -23,6 +23,7 @@ from .routers import (
     health,
     manuals,
     query,
+    superadmin,
     teaching,
     tenants,
     users,
@@ -182,3 +183,4 @@ app.include_router(teaching.router)
 app.include_router(viewer.router)
 app.include_router(analyze.router)
 app.include_router(admin.router)
+app.include_router(superadmin.router)

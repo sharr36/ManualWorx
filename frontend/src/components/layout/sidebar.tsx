@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Settings,
+  Shield,
   Users,
   Wrench,
   X,
@@ -43,6 +44,10 @@ const accountNav = [
 
 const adminNav = [
   { href: "/admin", label: "Team", icon: Users },
+];
+
+const superadminNav = [
+  { href: "/superadmin", label: "Super Admin", icon: Shield },
 ];
 
 export function Sidebar({ user, tenant, isOpen, onClose }: SidebarProps) {
@@ -92,6 +97,15 @@ export function Sidebar({ user, tenant, isOpen, onClose }: SidebarProps) {
             <>
               <div className="my-4 border-t border-slate-700" />
               {adminNav.map((item) => (
+                <NavLink key={item.href} item={item} pathname={pathname} />
+              ))}
+            </>
+          )}
+
+          {user.is_superadmin && (
+            <>
+              <div className="my-4 border-t border-red-700/50" />
+              {superadminNav.map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
             </>

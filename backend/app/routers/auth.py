@@ -102,8 +102,11 @@ async def get_current_user(request: Request) -> dict:
     if not result:
         raise HTTPException(status_code=404, detail="User not found")
 
+    user_data = _serialize_record(result["user"])
+    user_data["is_superadmin"] = getattr(request.state, "is_superadmin", False)
+
     return {
-        "user": _serialize_record(result["user"]),
+        "user": user_data,
         "tenant": _serialize_record(result["tenant"]),
     }
 

@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
+from ..config import settings
 from ..database import set_tenant_context
 from ..utils.security import hash_token
 
@@ -85,5 +86,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.user_name = row["name"]
         request.state.user_email = row["email"]
         request.state.user_skill_level = row["skill_level"]
+        request.state.is_superadmin = (
+            row["email"].lower() in settings.superadmin_email_set
+        )
 
         return await call_next(request)
