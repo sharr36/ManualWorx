@@ -55,6 +55,7 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
 
     # Extract embedded text first
     text = page.get_text("text")
+    is_scanned = False
 
     # Fallback to Tesseract OCR if embedded text is too short (scanned page)
     if len(text.strip()) < 50:
@@ -68,6 +69,7 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
             ocr_text = pytesseract.image_to_string(img, lang="eng")
             if len(ocr_text.strip()) > len(text.strip()):
                 text = ocr_text
+                is_scanned = True
             del ocr_pix, img
         except Exception as ocr_err:
             logger.warning("Page %d: Tesseract OCR failed: %s", page_number, ocr_err)
@@ -84,30 +86,29 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
         has_table = bool(_TABLE_PATTERNS.search(text))
 
     # Check for images (potential diagrams)
-    # Require multiple images or a large image to flag as diagram —
-    # a single small image is usually just a logo/header.
-    images = page.get_images(full=True)
-    image_count = len(images)
-    if image_count >= 3:
-        has_diagram = True
-    elif image_count >= 1:
-        # Check if any image covers a significant portion of the page
-        page_area = page.rect.width * page.rect.height
-        has_diagram = False
-        for img in images:
-            xref = img[0]
-            try:
-                rects = page.get_image_rects(xref)
-                for r in rects:
-                    if r.width * r.height > page_area * 0.15:
-                        has_diagram = True
-                        break
-            except Exception:
-                pass
-            if has_diagram:
-                break
-    else:
-        has_diagram = False
+    # For scanned pages, the entire page is one big image — don't count that
+    # as a diagram. Only detect diagrams on native-text PDF pages where
+    # embedded images represent actual figures/schematics.
+    has_diagram = False
+    if not is_scanned:
+        images = page.get_images(full=True)
+        image_count = len(images)
+        if image_count >= 3:
+            has_diagram = True
+        elif image_count >= 1:
+            page_area = page.rect.width * page.rect.height
+            for img in images:
+                xref = img[0]
+                try:
+                    rects = page.get_image_rects(xref)
+                    for r in rects:
+                        if r.width * r.height > page_area * 0.15:
+                            has_diagram = True
+                            break
+                except Exception:
+                    pass
+                if has_diagram:
+                    break
 
     # Classify the page
     classification = _classify_page(text, has_table, has_diagram)
