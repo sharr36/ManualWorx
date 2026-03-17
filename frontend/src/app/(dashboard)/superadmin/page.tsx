@@ -446,6 +446,7 @@ function ManualsTab() {
   const [reprocessing, setReprocessing] = useState<string | null>(null);
   const [reembedding, setReembedding] = useState<string | null>(null);
   const [reclassifying, setReclassifying] = useState<string | null>(null);
+  const [rechunking, setRechunking] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -497,6 +498,19 @@ function ManualsTab() {
       toast.error(e instanceof Error ? e.message : "Reclassify failed");
     } finally {
       setReclassifying(null);
+    }
+  };
+
+  const handleRechunk = async (id: string) => {
+    setRechunking(id);
+    try {
+      await api.post(`/api/superadmin/manuals/${id}/rechunk`);
+      toast.success("Re-chunking started — will delete old chunks, re-chunk, and embed");
+      await load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Re-chunk failed");
+    } finally {
+      setRechunking(null);
     }
   };
 
@@ -582,6 +596,19 @@ function ManualsTab() {
                           <RefreshCw className="mr-1 h-3 w-3" />
                         )}
                         Reclassify
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={rechunking === m.id}
+                        onClick={() => handleRechunk(m.id)}
+                      >
+                        {rechunking === m.id ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <RotateCw className="mr-1 h-3 w-3" />
+                        )}
+                        Re-chunk
                       </Button>
                     </div>
                   </td>

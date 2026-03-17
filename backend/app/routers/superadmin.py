@@ -562,11 +562,21 @@ async def reprocess_manual(manual_id: UUID, request: Request) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail="Manual not found")
 
-    # Enqueue re-ingestion
-    redis_client = getattr(request.app.state, "redis", None)
-    if not redis_client:
-        raise HTTPException(status_code=503, detail="Redis not available for job queue")
+    # Clear old data so ingestion starts fresh
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """DELETE FROM chunks WHERE page_id IN (
+                   SELECT id FROM pages WHERE manual_id = $1
+               )""",
+            manual_id,
+        )
+        await conn.execute("DELETE FROM pages WHERE manual_id = $1", manual_id)
+        await conn.execute(
+            "UPDATE manuals SET upload_status = 'processing', updated_at = NOW() WHERE id = $1",
+            manual_id,
+        )
 
+    # Enqueue re-ingestion
     try:
         from arq.connections import ArqRedis, create_pool as create_arq_pool
         from manualworx_shared.config import arq_redis_settings
@@ -575,13 +585,6 @@ async def reprocess_manual(manual_id: UUID, request: Request) -> dict:
         await arq.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to enqueue job: {e}")
-
-    # Reset status
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE manuals SET upload_status = 'processing', updated_at = NOW() WHERE id = $1",
-            manual_id,
-        )
 
     return {"status": "reprocessing", "manual_id": str(manual_id)}
 
@@ -671,3 +674,28 @@ async def reclassify_manual(manual_id: UUID, request: Request) -> dict:
         raise HTTPException(status_code=500, detail=f"Failed to enqueue classification: {e}")
 
     return {"status": "classification_queued", "pages": len(page_ids)}
+
+
+@router.post("/manuals/{manual_id}/rechunk")
+async def rechunk_manual_endpoint(manual_id: UUID, request: Request) -> dict:
+    """Delete existing chunks and re-chunk from page text, then embed."""
+    _require_superadmin(request)
+    pool = request.app.state.db_pool
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, tenant_id FROM manuals WHERE id = $1", manual_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    try:
+        from arq.connections import ArqRedis, create_pool as create_arq_pool
+        from manualworx_shared.config import arq_redis_settings
+        arq: ArqRedis = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
+        await arq.enqueue_job("rechunk_manual", str(manual_id))
+        await arq.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue rechunk: {e}")
+
+    return {"status": "rechunk_queued", "manual_id": str(manual_id)}

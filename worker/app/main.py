@@ -18,6 +18,7 @@ from .tasks.generate_embeddings import generate_embeddings
 from .tasks.generate_learning_path import generate_learning_path
 from .tasks.ingest_manual import ingest_manual
 from .tasks.process_page import process_page
+from .tasks.rechunk_manual import rechunk_manual
 
 # Configure logging so all messages are visible in fly logs
 logging.basicConfig(
@@ -191,6 +192,7 @@ class WorkerSettings:
         classify_pages,
         annotate_diagram,
         generate_learning_path,
+        rechunk_manual,
     ]
 
     on_startup = on_startup
