@@ -1,13 +1,15 @@
-"""OCR processing — extracts text from PDF pages using PyMuPDF."""
+"""OCR processing — extracts text from PDF pages using PyMuPDF + Tesseract fallback."""
 
 import asyncio
 import gc
+import io
 import logging
 import re
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Process, Queue
 
 import fitz
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +53,26 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
 
     page = doc[page_number]
 
-    # Extract text
+    # Extract embedded text first
     text = page.get_text("text")
+
+    # Fallback to Tesseract OCR if embedded text is too short (scanned page)
+    if len(text.strip()) < 50:
+        try:
+            import pytesseract
+            # Render page to image for OCR (use 300 DPI for better accuracy)
+            ocr_zoom = 300 / 72.0
+            ocr_mat = fitz.Matrix(ocr_zoom, ocr_zoom)
+            ocr_pix = page.get_pixmap(matrix=ocr_mat)
+            img = Image.open(io.BytesIO(ocr_pix.tobytes("png")))
+            ocr_text = pytesseract.image_to_string(img, lang="eng")
+            if len(ocr_text.strip()) > len(text.strip()):
+                text = ocr_text
+                logger.info("Page %d: Tesseract OCR extracted %d chars (embedded had %d)",
+                            page_number, len(ocr_text.strip()), len(page.get_text("text").strip()))
+            del ocr_pix, img
+        except Exception as ocr_err:
+            logger.warning("Page %d: Tesseract OCR failed: %s", page_number, ocr_err)
 
     # Detect tables (find_tables can hang on complex pages, use heuristic fallback)
     has_table = False
