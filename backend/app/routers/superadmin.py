@@ -562,7 +562,8 @@ async def reprocess_manual(manual_id: UUID, request: Request) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail="Manual not found")
 
-    # Clear old data so ingestion starts fresh
+    # Clear chunks so ingestion re-chunks after OCR. Keep existing pages
+    # so the resume logic skips already-OCR'd pages (much faster).
     async with pool.acquire() as conn:
         await conn.execute(
             """DELETE FROM chunks WHERE page_id IN (
@@ -570,7 +571,6 @@ async def reprocess_manual(manual_id: UUID, request: Request) -> dict:
                )""",
             manual_id,
         )
-        await conn.execute("DELETE FROM pages WHERE manual_id = $1", manual_id)
         await conn.execute(
             "UPDATE manuals SET upload_status = 'processing', updated_at = NOW() WHERE id = $1",
             manual_id,
@@ -732,3 +732,28 @@ async def reocr_manual_endpoint(manual_id: UUID, request: Request) -> dict:
         raise HTTPException(status_code=500, detail=f"Failed to enqueue re-OCR: {e}")
 
     return {"status": "reocr_queued", "manual_id": str(manual_id), "empty_pages": empty_count}
+
+
+@router.post("/manuals/{manual_id}/reclassify-heuristic")
+async def reclassify_heuristic_endpoint(manual_id: UUID, request: Request) -> dict:
+    """Re-run heuristic classification on all pages (fast, no AI, no re-OCR)."""
+    _require_superadmin(request)
+    pool = request.app.state.db_pool
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM manuals WHERE id = $1", manual_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    try:
+        from arq.connections import ArqRedis, create_pool as create_arq_pool
+        from manualworx_shared.config import arq_redis_settings
+        arq: ArqRedis = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
+        await arq.enqueue_job("reclassify_heuristic", str(manual_id))
+        await arq.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue: {e}")
+
+    return {"status": "reclassify_queued", "manual_id": str(manual_id)}

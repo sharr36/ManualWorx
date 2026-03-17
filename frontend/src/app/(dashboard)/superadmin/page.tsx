@@ -493,8 +493,8 @@ function ManualsTab() {
   const handleReclassify = async (id: string) => {
     setReclassifying(id);
     try {
-      await api.post(`/api/superadmin/manuals/${id}/reclassify`);
-      toast.success("Reclassification started");
+      await api.post(`/api/superadmin/manuals/${id}/reclassify-heuristic`);
+      toast.success("Heuristic reclassification started (fast, no AI cost)");
       await load();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Reclassify failed");

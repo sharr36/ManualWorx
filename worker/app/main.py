@@ -19,6 +19,7 @@ from .tasks.generate_learning_path import generate_learning_path
 from .tasks.ingest_manual import ingest_manual
 from .tasks.process_page import process_page
 from .tasks.rechunk_manual import rechunk_manual
+from .tasks.reclassify_heuristic import reclassify_heuristic
 from .tasks.reocr_empty_pages import reocr_empty_pages
 
 # Configure logging so all messages are visible in fly logs
@@ -194,6 +195,7 @@ class WorkerSettings:
         annotate_diagram,
         generate_learning_path,
         rechunk_manual,
+        reclassify_heuristic,
         reocr_empty_pages,
     ]
 
