@@ -4,6 +4,7 @@ import asyncio
 import gc
 import json
 import logging
+import time
 import traceback
 from functools import partial
 from uuid import UUID
@@ -100,6 +101,9 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
 
         await _publish_progress(ctx, manual_id, "ocr", page=len(existing_page_nums), total=page_count)
         pages_data = []
+        job_start = time.monotonic()
+        # Leave 10 minutes of headroom for chunking + embedding after OCR
+        max_ocr_seconds = config.JOB_TIMEOUT - 600 if hasattr(config, "JOB_TIMEOUT") else 6600
 
         # Load existing pages into pages_data
         for row in existing_pages:
@@ -113,6 +117,30 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
         for page_num in range(page_count):
             if page_num in existing_page_nums:
                 continue
+
+            # Auto-continuation: if running low on time, re-enqueue and exit
+            elapsed = time.monotonic() - job_start
+            if elapsed > max_ocr_seconds:
+                logger.warning(
+                    "[%s] Running low on time (%.0fs elapsed). "
+                    "Processed %d/%d pages so far. Re-enqueueing to continue...",
+                    manual_id[:8], elapsed, len(pages_data), page_count,
+                )
+                try:
+                    from arq.connections import ArqRedis
+                    arq_redis: ArqRedis | None = ctx.get("redis")
+                    if arq_redis:
+                        await arq_redis.enqueue_job("ingest_manual", manual_id, tenant_id)
+                        logger.info("[%s] Re-enqueued ingestion to continue from page %d",
+                                    manual_id[:8], page_num)
+                except Exception as e:
+                    logger.error("[%s] Failed to re-enqueue: %s", manual_id[:8], e)
+                return {
+                    "status": "continuing",
+                    "manual_id": manual_id,
+                    "pages_so_far": len(pages_data),
+                    "total": page_count,
+                }
 
             logger.info("[%s] Processing page %d/%d", manual_id[:8], page_num + 1, page_count)
             await _publish_progress(ctx, manual_id, "ocr", page=page_num + 1, total=page_count)

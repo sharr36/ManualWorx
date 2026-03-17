@@ -205,5 +205,5 @@ class WorkerSettings:
     redis_settings = arq_redis_settings(_config.REDIS_URL)
 
     max_jobs = 10
-    job_timeout = 1800  # 30 minutes per job (large manuals can have 300+ pages)
+    job_timeout = 7200  # 2 hours per job (large scanned manuals need Tesseract OCR per page)
     keep_result = 3600  # Keep results for 1 hour
