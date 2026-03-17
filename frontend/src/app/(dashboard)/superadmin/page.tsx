@@ -15,6 +15,7 @@ import {
   Play,
   RefreshCw,
   RotateCw,
+  ScanLine,
   Server,
   Shield,
   Terminal,
@@ -447,6 +448,7 @@ function ManualsTab() {
   const [reembedding, setReembedding] = useState<string | null>(null);
   const [reclassifying, setReclassifying] = useState<string | null>(null);
   const [rechunking, setRechunking] = useState<string | null>(null);
+  const [reocring, setReocring] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -511,6 +513,19 @@ function ManualsTab() {
       toast.error(e instanceof Error ? e.message : "Re-chunk failed");
     } finally {
       setRechunking(null);
+    }
+  };
+
+  const handleReocr = async (id: string) => {
+    setReocring(id);
+    try {
+      const res = await api.post<{ empty_pages: number }>(`/api/superadmin/manuals/${id}/reocr`);
+      toast.success(`Re-OCR started for ${res.empty_pages} empty pages — will rechunk + embed after`);
+      await load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Re-OCR failed");
+    } finally {
+      setReocring(null);
     }
   };
 
@@ -609,6 +624,19 @@ function ManualsTab() {
                           <RotateCw className="mr-1 h-3 w-3" />
                         )}
                         Re-chunk
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={reocring === m.id}
+                        onClick={() => handleReocr(m.id)}
+                      >
+                        {reocring === m.id ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <ScanLine className="mr-1 h-3 w-3" />
+                        )}
+                        Re-OCR
                       </Button>
                     </div>
                   </td>

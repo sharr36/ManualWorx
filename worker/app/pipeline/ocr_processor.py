@@ -60,16 +60,14 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
     if len(text.strip()) < 50:
         try:
             import pytesseract
-            # Render page to image for OCR (use 300 DPI for better accuracy)
-            ocr_zoom = 300 / 72.0
+            # Render at the requested DPI (reuse for OCR — avoids double render)
+            ocr_zoom = dpi / 72.0
             ocr_mat = fitz.Matrix(ocr_zoom, ocr_zoom)
             ocr_pix = page.get_pixmap(matrix=ocr_mat)
             img = Image.open(io.BytesIO(ocr_pix.tobytes("png")))
             ocr_text = pytesseract.image_to_string(img, lang="eng")
             if len(ocr_text.strip()) > len(text.strip()):
                 text = ocr_text
-                logger.info("Page %d: Tesseract OCR extracted %d chars (embedded had %d)",
-                            page_number, len(ocr_text.strip()), len(page.get_text("text").strip()))
             del ocr_pix, img
         except Exception as ocr_err:
             logger.warning("Page %d: Tesseract OCR failed: %s", page_number, ocr_err)
@@ -146,7 +144,7 @@ async def process_page_async(pdf_bytes: bytes, page_number: int, dpi: int = 150)
     loop = asyncio.get_event_loop()
 
     for attempt_dpi in [dpi, 72]:
-        result = await _run_page_in_process(loop, pdf_bytes, page_number, attempt_dpi, timeout=90)
+        result = await _run_page_in_process(loop, pdf_bytes, page_number, attempt_dpi, timeout=120)
         if result is not None:
             return result
         logger.warning(

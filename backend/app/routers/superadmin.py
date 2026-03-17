@@ -699,3 +699,36 @@ async def rechunk_manual_endpoint(manual_id: UUID, request: Request) -> dict:
         raise HTTPException(status_code=500, detail=f"Failed to enqueue rechunk: {e}")
 
     return {"status": "rechunk_queued", "manual_id": str(manual_id)}
+
+
+@router.post("/manuals/{manual_id}/reocr")
+async def reocr_manual_endpoint(manual_id: UUID, request: Request) -> dict:
+    """Re-OCR only empty pages, then rechunk and embed."""
+    _require_superadmin(request)
+    pool = request.app.state.db_pool
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, tenant_id FROM manuals WHERE id = $1", manual_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    # Count empty pages for the response
+    async with pool.acquire() as conn:
+        empty_count = await conn.fetchval(
+            """SELECT COUNT(*) FROM pages
+               WHERE manual_id = $1 AND (extracted_text IS NULL OR TRIM(extracted_text) = '')""",
+            manual_id,
+        )
+
+    try:
+        from arq.connections import ArqRedis, create_pool as create_arq_pool
+        from manualworx_shared.config import arq_redis_settings
+        arq: ArqRedis = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
+        await arq.enqueue_job("reocr_empty_pages", str(manual_id))
+        await arq.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue re-OCR: {e}")
+
+    return {"status": "reocr_queued", "manual_id": str(manual_id), "empty_pages": empty_count}
