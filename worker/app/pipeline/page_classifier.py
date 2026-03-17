@@ -14,22 +14,31 @@ logger = logging.getLogger(__name__)
 
 CLASSIFICATION_PROMPT = """You are classifying pages from a heavy equipment service manual. Classify this page into exactly ONE category.
 
-CLASSIFICATION RULES (apply in order):
-1. If the page is MOSTLY TEXT (procedures, instructions, descriptions, specifications, numbered steps, warnings, notes) — even if it has small diagrams, photos, or figures alongside the text — classify as "text". Most service manual pages are text.
-2. If the page shows a HYDRAULIC SYSTEM DIAGRAM with schematic symbols (flow lines, valves, pumps, cylinders, reservoirs) — classify as "hydraulic_schematic".
-3. If the page shows an ELECTRICAL/WIRING DIAGRAM with circuit symbols (wires, connectors, relays, fuses, ECM pinouts) — classify as "electrical_diagram".
-4. If the page shows an EXPLODED PARTS VIEW (assembly/disassembly diagram with numbered callouts pointing to individual parts, often with a parts list table) — classify as "parts_exploded_view".
-5. If the page contains a TABLE of torque specs, clearances, tolerances, or measurement values — classify as "torque_spec_table".
-6. If the page shows a TROUBLESHOOTING FLOWCHART or diagnostic decision tree — classify as "diagnostic_flowchart".
-7. If the page shows a WIRING HARNESS routing diagram or connector pinout table — classify as "wiring_harness".
-8. ONLY if the page is a FULL-PAGE photo or illustration with minimal text and doesn't fit categories 2-7, classify as "general_illustration".
+Look at the IMAGE carefully — text alone is not sufficient. Pay special attention to schematic symbols, flow lines, and circuit diagrams.
 
-IMPORTANT: Pages with text paragraphs AND small illustrations/figures are "text", NOT "general_illustration". The "general_illustration" category is ONLY for pages dominated by a single large image/photo with little to no readable text.
+CATEGORIES:
+- "hydraulic_schematic" — Page contains a HYDRAULIC SYSTEM DIAGRAM with schematic symbols: flow lines, valve symbols, pump symbols, cylinders, reservoirs, pressure gauges, filters. These are engineering schematics showing fluid flow paths. Even if there is some text labeling components, if the PRIMARY content is a hydraulic circuit diagram, use this.
+- "electrical_diagram" — Page contains an ELECTRICAL/WIRING DIAGRAM with circuit symbols: wires, connectors, relays, fuses, ECM pinouts, switches, resistors, ground symbols. Even with component labels/text, if it shows electrical circuits, use this.
+- "wiring_harness" — Page shows WIRING HARNESS routing paths, connector pinout tables, or wire color/gauge charts.
+- "diagnostic_flowchart" — Page shows a TROUBLESHOOTING FLOWCHART or diagnostic decision tree with yes/no branches, fault codes, or step-by-step diagnostic procedures in a flowchart format.
+- "parts_exploded_view" — Page shows an EXPLODED PARTS VIEW: an assembly/disassembly diagram with numbered callouts pointing to individual parts, usually with a parts list.
+- "torque_spec_table" — Page is dominated by a TABLE of torque specs, clearances, tolerances, pressures, or measurement values.
+- "general_illustration" — Page is a FULL-PAGE photo, cross-section drawing, or cutaway illustration that does NOT fit the above categories. Must have minimal text.
+- "text" — Page is PRIMARILY TEXT: procedures, instructions, descriptions, specifications written in paragraphs or numbered steps. Use this ONLY when the page has NO significant diagrams or schematics.
+
+DECISION PRIORITY:
+1. If you see schematic symbols (valves, pumps, circuit elements, flow arrows) → hydraulic_schematic or electrical_diagram
+2. If you see a flowchart with decision branches → diagnostic_flowchart
+3. If you see exploded parts with callout numbers → parts_exploded_view
+4. If you see a data table filling most of the page → torque_spec_table
+5. If you see wiring routes or connector tables → wiring_harness
+6. If mostly a large image/photo with minimal text → general_illustration
+7. Only if NONE of the above apply → text
 
 EXTRACTED TEXT FROM THIS PAGE:
 {page_text}
 
-Respond with ONLY the classification label. No explanation."""
+Respond with ONLY the classification label, nothing else."""
 
 VALID_CLASSIFICATIONS = {c.value for c in PageClassification}
 

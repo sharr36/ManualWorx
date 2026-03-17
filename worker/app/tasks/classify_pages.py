@@ -142,6 +142,7 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
     schematic_types = {
         "hydraulic_schematic", "electrical_diagram",
         "wiring_harness", "diagnostic_flowchart",
+        "parts_exploded_view", "general_illustration",
     }
     newly_schematic = [
         pd["page_id"] for pd, cls in zip(page_data_list, classifications)

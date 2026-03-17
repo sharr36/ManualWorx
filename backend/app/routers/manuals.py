@@ -407,9 +407,14 @@ async def get_manual_schematics(manual_id: UUID, request: Request) -> dict:
             FROM pages p
             LEFT JOIN diagram_annotations da ON da.page_id = p.id
             WHERE p.manual_id = $1
-              AND p.classification IN (
-                  'hydraulic_schematic', 'electrical_diagram',
-                  'wiring_harness', 'diagnostic_flowchart'
+              AND (
+                  p.classification IN (
+                      'hydraulic_schematic', 'electrical_diagram',
+                      'wiring_harness', 'diagnostic_flowchart',
+                      'parts_exploded_view', 'general_illustration'
+                  )
+                  OR p.has_diagram = TRUE
+                  OR da.page_id IS NOT NULL
               )
             ORDER BY p.page_number
             """,

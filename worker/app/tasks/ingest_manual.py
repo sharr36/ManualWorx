@@ -167,6 +167,7 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                 "page_number": page_num,
                 "text": result["text"],
                 "classification": result["classification"],
+                "has_diagram": result.get("has_diagram", False),
             })
 
             # Free memory immediately
@@ -293,14 +294,16 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
             except Exception as e:
                 logger.warning("Failed to enqueue classification job: %s", e)
 
-        # 9. Auto-annotate schematic pages with Claude Vision (non-blocking)
+        # 9. Auto-annotate schematic/diagram pages with Claude Vision (non-blocking)
+        # Annotate pages classified as schematics OR pages with detected diagrams
         schematic_types = {
             "hydraulic_schematic", "electrical_diagram",
             "wiring_harness", "diagnostic_flowchart",
+            "parts_exploded_view", "general_illustration",
         }
         schematic_page_ids = [
             p["page_id"] for p in pages_data
-            if p.get("classification") in schematic_types
+            if p.get("classification") in schematic_types or p.get("has_diagram")
         ]
         if schematic_page_ids:
             logger.info("[%s] Enqueuing annotation for %d schematic pages",

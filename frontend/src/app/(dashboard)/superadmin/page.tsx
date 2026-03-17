@@ -444,6 +444,8 @@ function ManualsTab() {
   const [manuals, setManuals] = useState<ManualInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [reprocessing, setReprocessing] = useState<string | null>(null);
+  const [reembedding, setReembedding] = useState<string | null>(null);
+  const [reclassifying, setReclassifying] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -469,6 +471,32 @@ function ManualsTab() {
       toast.error(e instanceof Error ? e.message : "Reprocess failed");
     } finally {
       setReprocessing(null);
+    }
+  };
+
+  const handleReembed = async (id: string) => {
+    setReembedding(id);
+    try {
+      await api.post(`/api/superadmin/manuals/${id}/re-embed`);
+      toast.success("Re-embedding started");
+      await load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Re-embed failed");
+    } finally {
+      setReembedding(null);
+    }
+  };
+
+  const handleReclassify = async (id: string) => {
+    setReclassifying(id);
+    try {
+      await api.post(`/api/superadmin/manuals/${id}/reclassify`);
+      toast.success("Reclassification started");
+      await load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Reclassify failed");
+    } finally {
+      setReclassifying(null);
     }
   };
 
@@ -515,19 +543,47 @@ function ManualsTab() {
                   <td className="p-3 text-center">{m.chunk_count}</td>
                   <td className="p-3 text-center">{m.annotation_count}</td>
                   <td className="p-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={reprocessing === m.id}
-                      onClick={() => handleReprocess(m.id)}
-                    >
-                      {reprocessing === m.id ? (
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                      ) : (
-                        <Play className="mr-1 h-3 w-3" />
-                      )}
-                      Reprocess
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={reprocessing === m.id}
+                        onClick={() => handleReprocess(m.id)}
+                      >
+                        {reprocessing === m.id ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <Play className="mr-1 h-3 w-3" />
+                        )}
+                        Reprocess
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={reembedding === m.id}
+                        onClick={() => handleReembed(m.id)}
+                      >
+                        {reembedding === m.id ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <Database className="mr-1 h-3 w-3" />
+                        )}
+                        Re-embed
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={reclassifying === m.id}
+                        onClick={() => handleReclassify(m.id)}
+                      >
+                        {reclassifying === m.id ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <RefreshCw className="mr-1 h-3 w-3" />
+                        )}
+                        Reclassify
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}

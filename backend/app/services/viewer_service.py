@@ -213,9 +213,14 @@ class ViewerService:
                        JOIN manuals m ON m.id = p.manual_id
                        LEFT JOIN diagram_annotations da ON da.page_id = p.id
                        WHERE m.tenant_id = $1 AND m.id = $2
-                         AND p.classification IN (
-                           'hydraulic_schematic', 'electrical_diagram',
-                           'wiring_harness', 'diagnostic_flowchart'
+                         AND (
+                           p.classification IN (
+                             'hydraulic_schematic', 'electrical_diagram',
+                             'wiring_harness', 'diagnostic_flowchart',
+                             'parts_exploded_view', 'general_illustration'
+                           )
+                           OR p.has_diagram = TRUE
+                           OR da.page_id IS NOT NULL
                          )
                        ORDER BY m.title, p.page_number""",
                     tenant_id,
@@ -231,9 +236,14 @@ class ViewerService:
                        JOIN manuals m ON m.id = p.manual_id
                        LEFT JOIN diagram_annotations da ON da.page_id = p.id
                        WHERE m.tenant_id = $1
-                         AND p.classification IN (
-                           'hydraulic_schematic', 'electrical_diagram',
-                           'wiring_harness', 'diagnostic_flowchart'
+                         AND (
+                           p.classification IN (
+                             'hydraulic_schematic', 'electrical_diagram',
+                             'wiring_harness', 'diagnostic_flowchart',
+                             'parts_exploded_view', 'general_illustration'
+                           )
+                           OR p.has_diagram = TRUE
+                           OR da.page_id IS NOT NULL
                          )
                        ORDER BY m.title, p.page_number""",
                     tenant_id,

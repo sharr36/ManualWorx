@@ -584,3 +584,90 @@ async def reprocess_manual(manual_id: UUID, request: Request) -> dict:
         )
 
     return {"status": "reprocessing", "manual_id": str(manual_id)}
+
+
+@router.post("/manuals/{manual_id}/re-embed")
+async def re_embed_manual(manual_id: UUID, request: Request) -> dict:
+    """Re-embed all chunks for a manual (when Qdrant was unavailable during ingestion)."""
+    _require_superadmin(request)
+    pool = request.app.state.db_pool
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, tenant_id FROM manuals WHERE id = $1", manual_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    # Get all chunk IDs for this manual
+    async with pool.acquire() as conn:
+        chunk_rows = await conn.fetch(
+            """SELECT c.id FROM chunks c
+               JOIN pages p ON p.id = c.page_id
+               WHERE p.manual_id = $1""",
+            manual_id,
+        )
+
+    if not chunk_rows:
+        return {"status": "no_chunks", "manual_id": str(manual_id)}
+
+    chunk_ids = [str(r["id"]) for r in chunk_rows]
+
+    # Enqueue embedding job in batches of 100
+    try:
+        from arq.connections import ArqRedis, create_pool as create_arq_pool
+        from manualworx_shared.config import arq_redis_settings
+        arq: ArqRedis = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
+
+        batch_size = 100
+        jobs_enqueued = 0
+        for i in range(0, len(chunk_ids), batch_size):
+            batch = chunk_ids[i:i + batch_size]
+            await arq.enqueue_job("generate_embeddings", batch)
+            jobs_enqueued += 1
+
+        await arq.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue embedding: {e}")
+
+    return {
+        "status": "embedding_queued",
+        "manual_id": str(manual_id),
+        "chunks": len(chunk_ids),
+        "jobs": jobs_enqueued,
+    }
+
+
+@router.post("/manuals/{manual_id}/reclassify")
+async def reclassify_manual(manual_id: UUID, request: Request) -> dict:
+    """Re-run AI classification on all pages of a manual (cross-tenant)."""
+    _require_superadmin(request)
+    pool = request.app.state.db_pool
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, tenant_id FROM manuals WHERE id = $1", manual_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    async with pool.acquire() as conn:
+        page_rows = await conn.fetch(
+            "SELECT id FROM pages WHERE manual_id = $1", manual_id,
+        )
+
+    if not page_rows:
+        return {"status": "no_pages"}
+
+    page_ids = [str(r["id"]) for r in page_rows]
+
+    try:
+        from arq.connections import ArqRedis, create_pool as create_arq_pool
+        from manualworx_shared.config import arq_redis_settings
+        arq: ArqRedis = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
+        await arq.enqueue_job("classify_pages", str(manual_id), page_ids)
+        await arq.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue classification: {e}")
+
+    return {"status": "classification_queued", "pages": len(page_ids)}
