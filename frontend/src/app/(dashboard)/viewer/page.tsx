@@ -78,6 +78,7 @@ export default function ViewerPage() {
   const [selectedPage, setSelectedPage] = useState<DiagramPageItem | null>(null);
   const [annotation, setAnnotation] = useState<DiagramAnnotation | null>(null);
   const [annotating, setAnnotating] = useState(false);
+  const [annotationError, setAnnotationError] = useState<string | null>(null);
   const [selectedComponent, setSelectedComponent] = useState<DiagramComponent | null>(null);
   const [selectedState, setSelectedState] = useState<OperatingState | null>(null);
   const [mode, setMode] = useState<ViewerMode>("select");
@@ -109,6 +110,7 @@ export default function ViewerPage() {
     setSelectedComponent(null);
     setSelectedState(null);
     setAnnotation(null);
+    setAnnotationError(null);
 
     if (page.annotated) {
       try {
@@ -135,10 +137,11 @@ export default function ViewerPage() {
   const handleAnnotate = async () => {
     if (!selectedPage) return;
     setAnnotating(true);
+    setAnnotationError(null);
     try {
       const result = await api.post<DiagramAnnotation>("/api/viewer/annotate", {
         page_id: selectedPage.page_id,
-      });
+      }, { timeout: 120_000 });
       setAnnotation(result);
       // Update the page list to show annotated
       setDiagramPages((prev) =>
@@ -148,8 +151,9 @@ export default function ViewerPage() {
             : p
         )
       );
-    } catch {
-      // annotation failed
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Annotation failed";
+      setAnnotationError(msg);
     } finally {
       setAnnotating(false);
     }
@@ -517,6 +521,17 @@ export default function ViewerPage() {
                     <span className="text-sm font-medium">
                       Analyzing diagram with AI...
                     </span>
+                  </div>
+                </div>
+              )}
+              {annotationError && !annotating && !annotation && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/5">
+                  <div className="flex flex-col items-center gap-3 rounded-lg bg-white px-6 py-4 shadow-lg max-w-sm">
+                    <ZapOff className="h-5 w-5 text-red-500" />
+                    <p className="text-sm text-red-600 text-center">{annotationError}</p>
+                    <Button onClick={handleAnnotate} size="sm" variant="outline">
+                      Retry Annotation
+                    </Button>
                   </div>
                 </div>
               )}

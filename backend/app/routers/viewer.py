@@ -1,8 +1,11 @@
 """Interactive schematic viewer endpoints (Phase 5)."""
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 from ..models.viewer import (
     AnnotateRequest,
@@ -32,6 +35,9 @@ async def annotate_diagram(body: AnnotateRequest, request: Request) -> Annotatio
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Annotation failed for page %s: %s", body.page_id, e)
+        raise HTTPException(status_code=500, detail=f"Annotation failed: {e}")
 
     return AnnotationResponse(**result)
 

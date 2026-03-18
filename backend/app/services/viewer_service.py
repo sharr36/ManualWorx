@@ -1,10 +1,12 @@
 """Interactive schematic viewer service (Phase 5)."""
 
 import json
+import logging
 from uuid import UUID
 
 from .ai_service import AIService
 
+logger = logging.getLogger(__name__)
 _ai = AIService()
 
 
@@ -57,7 +59,7 @@ class ViewerService:
             # Fetch page for image + text
             page = await conn.fetchrow(
                 """SELECT p.id, p.page_number, p.classification, p.extracted_text,
-                          p.image_storage_key, p.manual_id
+                          p.image_url, p.manual_id
                    FROM pages p
                    JOIN manuals m ON m.id = p.manual_id
                    WHERE p.id = $1 AND m.tenant_id = $2""",
@@ -79,12 +81,16 @@ class ViewerService:
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
         )
 
-        storage_key = page["image_storage_key"]
+        storage_key = page["image_url"]
         if not storage_key:
-            storage_key = f"manuals/{page['manual_id']}/pages/{page['page_number']}.png"
+            storage_key = f"manuals/{tenant_id}/{page['manual_id']}/pages/{page['page_number']}.png"
 
-        obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=storage_key)
-        image_bytes = obj["Body"].read()
+        try:
+            obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=storage_key)
+            image_bytes = obj["Body"].read()
+        except Exception as e:
+            logger.error("Failed to fetch page image from S3 key=%s: %s", storage_key, e)
+            raise ValueError(f"Could not load page image: {e}")
 
         # Determine diagram type
         dt = diagram_type

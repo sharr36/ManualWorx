@@ -143,11 +143,11 @@ class ApiClient {
     return this.request<T>(path, { method: "GET" });
   }
 
-  post<T>(path: string, body?: unknown) {
+  post<T>(path: string, body?: unknown, config?: { timeout?: number }) {
     return this.request<T>(path, {
       method: "POST",
       body: body ? JSON.stringify(body) : undefined,
-    });
+    }, config);
   }
 
   patch<T>(path: string, body?: unknown) {
