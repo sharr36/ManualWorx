@@ -480,7 +480,7 @@ CRITICAL RULES:
 
         start = time.monotonic()
         response = await self.client.messages.create(
-            model=settings.DEFAULT_MODEL,
+            model=settings.ANNOTATION_MODEL,
             max_tokens=16384,
             messages=[
                 {
@@ -502,6 +502,7 @@ CRITICAL RULES:
         latency_ms = int((time.monotonic() - start) * 1000)
 
         text = response.content[0].text.strip()
+        was_truncated = response.stop_reason == "max_tokens"
 
         # Extract JSON from response
         start_idx = text.find("{")
@@ -519,7 +520,20 @@ CRITICAL RULES:
                 "latency_ms": latency_ms,
             }
 
-        result = json.loads(text[start_idx:end_idx])
+        json_text = text[start_idx:end_idx]
+        try:
+            result = json.loads(json_text)
+        except json.JSONDecodeError:
+            if was_truncated:
+                # Response was truncated at max_tokens — try to repair the JSON
+                logger.warning(
+                    "Annotation response truncated at max_tokens (%d chars), attempting repair",
+                    len(json_text),
+                )
+                result = self._repair_truncated_json(json_text, diagram_type)
+            else:
+                logger.error("Failed to parse annotation JSON (%d chars)", len(json_text))
+                raise ValueError("AI returned invalid JSON for annotation")
 
         components = result.get("components", [])
         connections = result.get("connections", [])
@@ -533,9 +547,51 @@ CRITICAL RULES:
             "component_count": len(components),
             "connection_count": len(connections),
             "confidence_overall": float(result.get("confidence", 0.5)),
-            "model_used": settings.DEFAULT_MODEL,
+            "model_used": settings.ANNOTATION_MODEL,
             "latency_ms": latency_ms,
         }
+
+    @staticmethod
+    def _repair_truncated_json(text: str, diagram_type: str | None = None) -> dict:
+        """Best-effort repair of truncated JSON from max_tokens cutoff.
+
+        Strategy: find the last complete array entry for each top-level key,
+        close all open brackets/braces, and parse.
+        """
+        import re
+
+        # Try progressively trimming from the end until JSON parses
+        # First, strip any trailing incomplete object/array entry
+        for trim_pattern in [
+            # Remove last incomplete object in an array: , { ...
+            r',\s*\{[^}]*$',
+            # Remove last incomplete array entry: , [ ...
+            r',\s*\[[^\]]*$',
+            # Remove trailing comma
+            r',\s*$',
+        ]:
+            text = re.sub(trim_pattern, '', text)
+
+        # Count open brackets and braces, close them
+        open_braces = text.count('{') - text.count('}')
+        open_brackets = text.count('[') - text.count(']')
+
+        # Close open arrays first, then objects
+        text += ']' * max(0, open_brackets)
+        text += '}' * max(0, open_braces)
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Last resort: return whatever we have as components-only
+            logger.warning("JSON repair failed, returning empty annotation")
+            return {
+                "diagram_type": diagram_type or "hydraulic_schematic",
+                "components": [],
+                "connections": [],
+                "operating_states": [],
+                "confidence": 0.3,
+            }
 
     async def auto_detect_mode(self, query_text: str) -> str:
         """Use Claude to classify query intent into the best mode."""
