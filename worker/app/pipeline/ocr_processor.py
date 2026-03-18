@@ -15,11 +15,20 @@ logger = logging.getLogger(__name__)
 
 # Heuristic patterns for page classification
 _TABLE_PATTERNS = re.compile(r"(\|\s*\w+\s*\|)|(\d+\s*[Nn]\.?[Mm])|(\d+\s*ft[\.\s-]?lb)")
+
+# Hydraulic-ONLY terms (removed "circuit" — shared with electrical)
 _SCHEMATIC_KEYWORDS = re.compile(
-    r"(hydraulic|schematic|circuit|valve|pump|cylinder|flow)", re.I
+    r"(hydraulic|valve|pump|cylinder|psi|bar\b|spool|manifold|reservoir|flow\s*control|relief\s*valve)", re.I
 )
+# Electrical-specific terms (expanded to catch connectors, pinouts, wire colors)
 _ELECTRICAL_KEYWORDS = re.compile(
-    r"(wiring|harness|connector|pin\s*\d|ECM|fuse|relay|voltage)", re.I
+    r"(wir(?:ing|e)|harness|connector|pin\s*\d|ECM|fuse|relay|voltage|solenoid|"
+    r"battery|alternator|ground|amp|ohm|resistor|switch|terminal|"
+    r"color\s*code|(?:blk|red|wht|grn|blu|yel|org|brn|pnk|pur)\b)", re.I
+)
+# Shared terms that could be either — used for tiebreaking
+_SHARED_SCHEMATIC = re.compile(
+    r"(circuit|schematic|flow|diagram|pressure|sensor)", re.I
 )
 _DIAGRAM_KEYWORDS = re.compile(
     r"(fig\w*\.?\s*\d|figure\s*\d|diagram|illustration|exploded\s*view)", re.I
@@ -53,16 +62,40 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
 
     page = doc[page_number]
 
+    # Detect oversized pages (foldout schematics) — cap rendering to avoid OOM/timeout
+    page_w_in = page.rect.width / 72.0  # width in inches
+    page_h_in = page.rect.height / 72.0  # height in inches
+    page_area_sqin = page_w_in * page_h_in
+    is_oversized = page_area_sqin > 200  # > ~14x14 inches (anything bigger than tabloid)
+
+    # For oversized pages, reduce DPI to keep pixel count manageable
+    # A 24x36" page at 150 DPI = 3600x5400 = 19MP → Tesseract will timeout
+    # Cap at ~8MP (roughly 4000x2000) which is enough for readable rendering
+    effective_dpi = dpi
+    if is_oversized:
+        max_pixels = 8_000_000
+        pixels_at_dpi = (page_w_in * dpi) * (page_h_in * dpi)
+        if pixels_at_dpi > max_pixels:
+            import math
+            scale = math.sqrt(max_pixels / pixels_at_dpi)
+            effective_dpi = max(int(dpi * scale), 72)
+            logger.info(
+                "Page %d is oversized (%.0fx%.0f in, %.0f sq in) — reducing DPI from %d to %d",
+                page_number, page_w_in, page_h_in, page_area_sqin, dpi, effective_dpi,
+            )
+
     # Extract embedded text first
     text = page.get_text("text")
     is_scanned = False
 
     # Fallback to Tesseract OCR if embedded text is too short (scanned page)
-    if len(text.strip()) < 50:
+    # Skip Tesseract for oversized pages — it will timeout on huge images
+    # and schematics have labels that are too small for reliable OCR anyway
+    if len(text.strip()) < 50 and not is_oversized:
         try:
             import pytesseract
             # Render at the requested DPI (reuse for OCR — avoids double render)
-            ocr_zoom = dpi / 72.0
+            ocr_zoom = effective_dpi / 72.0
             ocr_mat = fitz.Matrix(ocr_zoom, ocr_zoom)
             ocr_pix = page.get_pixmap(matrix=ocr_mat)
             img = Image.open(io.BytesIO(ocr_pix.tobytes("png")))
@@ -110,12 +143,33 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
                 if has_diagram:
                     break
 
+    # For oversized pages with embedded text, classify as electrical/schematic
+    # based on page dimensions alone — large foldout pages are almost always schematics
+    if is_oversized and not is_scanned:
+        # Use embedded text for classification (it's already extracted)
+        has_diagram = True  # Oversized pages are schematics by definition
+
     # Classify the page
     classification = _classify_page(text, has_table, has_diagram)
+
+    # If oversized page got classified as 'text', override — large foldouts
+    # are schematics, not text pages.
+    if is_oversized and classification == "text":
+        el_hits = len(_ELECTRICAL_KEYWORDS.findall(text))
+        hy_hits = len(_SCHEMATIC_KEYWORDS.findall(text))
+        if el_hits > hy_hits:
+            classification = "electrical_diagram"
+        elif hy_hits > 0:
+            classification = "hydraulic_schematic"
+        else:
+            classification = "electrical_diagram"  # large foldouts default to electrical
+        logger.info("Page %d: oversized page reclassified as %s", page_number, classification)
+
     confidence = 0.95 if text.strip() else 0.0
 
-    # Render page image as PNG
-    zoom = dpi / 72.0
+    # Render page image as PNG (use effective DPI for oversized pages)
+    render_dpi = effective_dpi if is_oversized else dpi
+    zoom = render_dpi / 72.0
     mat = fitz.Matrix(zoom, zoom)
     pix = page.get_pixmap(matrix=mat)
     image_bytes = pix.tobytes("png")
@@ -144,14 +198,15 @@ async def process_page_async(pdf_bytes: bytes, page_number: int, dpi: int = 150)
     """
     loop = asyncio.get_event_loop()
 
-    for attempt_dpi in [dpi, 72]:
-        result = await _run_page_in_process(loop, pdf_bytes, page_number, attempt_dpi, timeout=120)
+    for attempt_dpi, timeout in [(dpi, 180), (72, 120)]:
+        result = await _run_page_in_process(loop, pdf_bytes, page_number, attempt_dpi, timeout=timeout)
         if result is not None:
             return result
         logger.warning(
-            "Page %d failed at %d DPI, %s",
+            "Page %d failed at %d DPI (timeout=%ds), %s",
             page_number,
             attempt_dpi,
+            timeout,
             "retrying at 72 DPI" if attempt_dpi != 72 else "using placeholder",
         )
 
@@ -221,52 +276,60 @@ def _classify_page(text: str, has_table: bool, has_diagram: bool) -> str:
     if has_table and _TABLE_PATTERNS.search(text):
         return "torque_spec_table"
 
-    # Count keyword matches for hydraulic and electrical
+    # Count keyword matches for hydraulic and electrical (mutually exclusive terms)
     hydraulic_hits = len(_SCHEMATIC_KEYWORDS.findall(text))
     electrical_hits = len(_ELECTRICAL_KEYWORDS.findall(text))
+    shared_hits = len(_SHARED_SCHEMATIC.findall(text))
+
+    # Shared terms (circuit, schematic, diagram, pressure, sensor, flow)
+    # add to BOTH counts for threshold detection, but don't shift the balance
+    total_hydraulic = hydraulic_hits + shared_hits
+    total_electrical = electrical_hits + shared_hits
 
     # --- Scanned-page schematic detection ---
-    # Scanned schematics have has_diagram=False but can be identified by:
-    # 1. High keyword density relative to total text
-    # 2. Short text (schematic labels only, not paragraphs)
-    # 3. Presence of component designators (V1, P2, M3, etc.)
     has_designators = bool(re.search(
         r"(?<![a-zA-Z])[A-Z]{1,3}\s*\d{1,3}(?!\d)", text
     ))  # matches V1, P2, M3, SOL1, etc.
 
-    # Keyword density: how many schematic keywords per 100 chars
+    # Keyword density: how many specific keywords per 100 chars
     if text_len > 0:
         hydraulic_density = (hydraulic_hits / text_len) * 100
         electrical_density = (electrical_hits / text_len) * 100
     else:
         hydraulic_density = electrical_density = 0.0
 
-    # Hydraulic schematics — diagrams with hydraulic terms, or pages with
-    # strong hydraulic keyword signals (works for both native and scanned)
-    if _SCHEMATIC_KEYWORDS.search(text) and has_diagram:
-        return "hydraulic_schematic"
-    if hydraulic_hits >= 3 and text_len < 800:
-        return "hydraulic_schematic"
-    # Scanned schematic: high keyword density or designators + keywords
-    if not has_diagram and hydraulic_hits >= 2 and (
-        hydraulic_density > 0.3
-        or (has_designators and hydraulic_hits >= 2)
-        or (text_len < 400 and hydraulic_hits >= 2)
-    ):
-        return "hydraulic_schematic"
+    # --- Determine schematic type by comparing SPECIFIC (non-shared) hits ---
+    # If electrical-specific terms > hydraulic-specific terms → electrical
+    # This prevents connector/pinout pages from being misclassified as hydraulic
+    def _pick_schematic_type() -> str:
+        if electrical_hits > hydraulic_hits:
+            return "electrical_diagram"
+        if hydraulic_hits > electrical_hits:
+            return "hydraulic_schematic"
+        # Tie — look for stronger electrical signals
+        if re.search(r"(connector|pin\s*\d|wire|harness|fuse|relay|terminal)", text, re.I):
+            return "electrical_diagram"
+        if re.search(r"(hydraulic|pump|cylinder|spool|manifold|reservoir)", text, re.I):
+            return "hydraulic_schematic"
+        return "electrical_diagram"  # default for ambiguous diagrams
 
-    # Electrical diagrams — same logic adapted for scanned pages
-    if _ELECTRICAL_KEYWORDS.search(text) and has_diagram:
-        return "electrical_diagram"
-    if electrical_hits >= 3 and text_len < 800:
-        return "electrical_diagram"
-    # Scanned schematic: high keyword density or designators + keywords
-    if not has_diagram and electrical_hits >= 2 and (
-        electrical_density > 0.3
-        or (has_designators and electrical_hits >= 2)
-        or (text_len < 400 and electrical_hits >= 2)
-    ):
-        return "electrical_diagram"
+    # Diagram pages with schematic keywords — compare both to pick correct type
+    if has_diagram and (total_hydraulic > 0 or total_electrical > 0):
+        return _pick_schematic_type()
+
+    # Short text with strong keyword signal (native or scanned)
+    if (total_hydraulic >= 3 or total_electrical >= 3) and text_len < 800:
+        return _pick_schematic_type()
+
+    # Scanned schematic detection (no has_diagram flag available)
+    if not has_diagram and (hydraulic_hits >= 2 or electrical_hits >= 2):
+        specific_hits = max(hydraulic_hits, electrical_hits)
+        if (
+            (specific_hits / max(text_len, 1)) * 100 > 0.3
+            or (has_designators and specific_hits >= 2)
+            or (text_len < 400 and specific_hits >= 2)
+        ):
+            return _pick_schematic_type()
 
     # Diagnostic flowcharts
     if re.search(r"(troubleshoot|diagnostic|fault|error\s*code)", text, re.I):
@@ -288,32 +351,22 @@ def _classify_page(text: str, has_table: bool, has_diagram: bool) -> str:
     if _ELECTRICAL_KEYWORDS.search(text) and not has_diagram:
         return "wiring_harness"
 
-    # Diagrams with figure references
+    # Diagrams with figure references — use comparative approach
     if has_diagram and _DIAGRAM_KEYWORDS.search(text):
-        # Try to determine type from surrounding text
-        if hydraulic_hits > electrical_hits:
-            return "hydraulic_schematic"
-        if electrical_hits > hydraulic_hits:
-            return "electrical_diagram"
+        if hydraulic_hits > 0 or electrical_hits > 0:
+            return _pick_schematic_type()
         return "general_illustration"
 
     # Short text on diagram pages — likely a schematic with labels
     if has_diagram and text_len < 200:
-        if hydraulic_hits > 0:
-            return "hydraulic_schematic"
-        if electrical_hits > 0:
-            return "electrical_diagram"
+        if hydraulic_hits > 0 or electrical_hits > 0:
+            return _pick_schematic_type()
         return "general_illustration"
 
     # Last resort for scanned pages: very short text with designators
-    # suggests a schematic where OCR only picked up labels
     if not has_diagram and text_len < 300 and has_designators:
-        if hydraulic_hits > electrical_hits:
-            return "hydraulic_schematic"
-        if electrical_hits > 0:
-            return "electrical_diagram"
-        if hydraulic_hits > 0:
-            return "hydraulic_schematic"
+        if hydraulic_hits > 0 or electrical_hits > 0:
+            return _pick_schematic_type()
         return "general_illustration"
 
     return "text"
