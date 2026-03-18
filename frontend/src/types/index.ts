@@ -198,6 +198,7 @@ export interface DiagramConnection {
   to_id: string;
   line_type: string;
   label?: string;
+  waypoints?: [number, number][];
 }
 
 export interface FlowPath {

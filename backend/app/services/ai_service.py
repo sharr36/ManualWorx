@@ -409,6 +409,9 @@ Return ONLY a JSON array:
 
         prompt = f"""Analyze this technical diagram from a heavy equipment service manual.{type_hint}{text_hint}
 
+You MUST identify every individual discrete component and trace every circuit/wire path.
+Take your time — thoroughness is more important than speed.
+
 Extract the following as JSON:
 
 {{
@@ -416,9 +419,9 @@ Extract the following as JSON:
   "components": [
     {{
       "id": "unique_id",
-      "designator": "component label from diagram (e.g. V1, M2, S3)",
+      "designator": "exact label from diagram (e.g. RY1, SW1, M3, K5, 24-19)",
       "name": "descriptive name",
-      "type": "valve|pump|motor|cylinder|filter|accumulator|gauge|switch|relay|solenoid|sensor|connector|fuse|resistor|other",
+      "type": "valve|pump|motor|cylinder|filter|accumulator|gauge|switch|relay|solenoid|sensor|connector|fuse|resistor|battery|alternator|starter|light|other",
       "bbox_pct": [x_pct, y_pct, width_pct, height_pct],
       "specs": {{"key": "value"}}
     }}
@@ -428,18 +431,19 @@ Extract the following as JSON:
       "from_id": "component_id",
       "to_id": "component_id",
       "line_type": "pressure|return|pilot|drain|charge|power_positive|ground_negative|signal_data|can_bus",
-      "label": "optional line label"
+      "label": "wire number or line label if visible",
+      "waypoints": [[x_pct, y_pct], [x_pct, y_pct]]
     }}
   ],
   "operating_states": [
     {{
       "id": "state_id",
-      "name": "state name (e.g. Neutral, Extend, Retract)",
+      "name": "state name (e.g. Neutral, Extend, Retract, Key ON, Cranking)",
       "description": "what happens in this state",
       "active_components": ["component_ids that are active"],
       "flow_paths": [
         {{
-          "line_type": "pressure|return|etc",
+          "line_type": "pressure|return|power_positive|ground_negative|etc",
           "path": ["component_id_1", "component_id_2", "..."]
         }}
       ]
@@ -448,18 +452,36 @@ Extract the following as JSON:
   "confidence": 0.0 to 1.0
 }}
 
-Important:
-- bbox_pct coordinates are percentages (0-100) of image width/height
-- Include ALL visible components and connections
-- For hydraulic schematics: identify pressure, return, pilot, and drain lines
-- For electrical: identify power, ground, signal, and CAN bus lines
-- Generate realistic operating states based on the circuit design
-- If uncertain about a component, include it with lower confidence"""
+CRITICAL RULES:
+1. INDIVIDUAL COMPONENTS ONLY: Each component must be a single discrete device
+   (one relay, one switch, one connector, one fuse, etc.).
+   NEVER group multiple components into a single "section" or "area" entry.
+   A "Power Distribution Section" is NOT a component — the individual relays,
+   fuses, and switches within it ARE components.
+
+2. TIGHT BOUNDING BOXES: bbox_pct must tightly wrap the component symbol only.
+   Typical component bbox should be 2-8% of image width and 2-8% height.
+   If a bbox exceeds 15% in either dimension, you are probably grouping — split it.
+
+3. CIRCUIT TRACING with waypoints: For each connection, provide waypoints
+   that trace the actual wire/line path as drawn on the diagram.
+   Waypoints are [x_pct, y_pct] coordinates (0-100) along the path.
+   Include bends, junctions, and routing points. Minimum 2 waypoints per connection
+   (start and end). For lines with bends, include intermediate points.
+
+4. EVERY wire and line visible on the diagram must be a connection entry.
+   Include wire numbers/labels when visible (e.g. "000", "772", "864").
+
+5. For electrical diagrams: trace power from battery through switches, relays,
+   and loads to ground. Identify every wire by its number if labeled.
+
+6. bbox_pct coordinates are percentages (0-100) of image width/height.
+   [x, y] is top-left corner. [width, height] is size."""
 
         start = time.monotonic()
         response = await self.client.messages.create(
             model=settings.DEFAULT_MODEL,
-            max_tokens=4096,
+            max_tokens=16384,
             messages=[
                 {
                     "role": "user",

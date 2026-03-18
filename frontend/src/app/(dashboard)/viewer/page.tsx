@@ -407,10 +407,8 @@ export default function ViewerPage() {
                     viewBox="0 0 100 100"
                     preserveAspectRatio="none"
                   >
-                    {/* Connection lines — only show when a component is selected */}
-                    {selectedComponent && visibleConnections?.filter(
-                      (c) => c.from_id === selectedComponent.id || c.to_id === selectedComponent.id
-                    ).map((conn, i) => {
+                    {/* Connection circuit paths — drawn as polylines through waypoints */}
+                    {visibleConnections?.map((conn, i) => {
                       const fromComp = annotation.annotation_data.components.find(
                         (c) => c.id === conn.from_id
                       );
@@ -419,27 +417,72 @@ export default function ViewerPage() {
                       );
                       if (!fromComp || !toComp) return null;
 
+                      const isSelectedConn = selectedComponent && (
+                        conn.from_id === selectedComponent.id ||
+                        conn.to_id === selectedComponent.id
+                      );
+
+                      const isActiveConn =
+                        !selectedState ||
+                        (activeComponentIds.has(conn.from_id) &&
+                          activeComponentIds.has(conn.to_id));
+
+                      // Build path: component center → waypoints → component center
                       const fromX = fromComp.bbox_pct[0] + fromComp.bbox_pct[2] / 2;
                       const fromY = fromComp.bbox_pct[1] + fromComp.bbox_pct[3] / 2;
                       const toX = toComp.bbox_pct[0] + toComp.bbox_pct[2] / 2;
                       const toY = toComp.bbox_pct[1] + toComp.bbox_pct[3] / 2;
 
+                      const waypoints = conn.waypoints;
+                      let pathD: string;
+                      if (waypoints && waypoints.length >= 2) {
+                        // Use waypoints for circuit tracing
+                        pathD = `M ${waypoints[0][0]} ${waypoints[0][1]}`;
+                        for (let w = 1; w < waypoints.length; w++) {
+                          pathD += ` L ${waypoints[w][0]} ${waypoints[w][1]}`;
+                        }
+                      } else {
+                        // Fallback: straight line between component centers
+                        pathD = `M ${fromX} ${fromY} L ${toX} ${toY}`;
+                      }
+
+                      const color = getLineColor(conn.line_type);
+                      const isDashed = conn.line_type === "pilot" ||
+                        conn.line_type === "signal_data" ||
+                        conn.line_type === "can_bus";
+
                       return (
-                        <line
-                          key={`conn-${i}`}
-                          x1={fromX}
-                          y1={fromY}
-                          x2={toX}
-                          y2={toY}
-                          stroke={getLineColor(conn.line_type)}
-                          strokeWidth={0.25}
-                          opacity={0.6}
-                          strokeDasharray="0.5 0.3"
-                        />
+                        <g key={`conn-${i}`}>
+                          <path
+                            d={pathD}
+                            stroke={color}
+                            strokeWidth={isSelectedConn ? 0.4 : 0.2}
+                            opacity={isSelectedConn ? 0.9 : isActiveConn ? 0.35 : 0.1}
+                            fill="none"
+                            strokeDasharray={isDashed ? "0.5 0.3" : undefined}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          {/* Wire label on selected connections */}
+                          {isSelectedConn && conn.label && waypoints && waypoints.length >= 2 && (
+                            <text
+                              x={waypoints[Math.floor(waypoints.length / 2)][0]}
+                              y={waypoints[Math.floor(waypoints.length / 2)][1] - 0.4}
+                              textAnchor="middle"
+                              fontSize={0.6}
+                              fill={color}
+                              fontWeight="bold"
+                              fontFamily="system-ui, sans-serif"
+                              style={{ pointerEvents: "none" }}
+                            >
+                              {conn.label}
+                            </text>
+                          )}
+                        </g>
                       );
                     })}
 
-                    {/* Component markers — small pin labels at center of bbox */}
+                    {/* Component bounding boxes + labels */}
                     {filteredComponents?.map((comp) => {
                       const isActive =
                         !selectedState || activeComponentIds.has(comp.id);
@@ -456,56 +499,70 @@ export default function ViewerPage() {
                             .toLowerCase()
                             .includes(searchTerm.toLowerCase()));
 
-                      // Place marker at center of bbox
-                      const cx = comp.bbox_pct[0] + comp.bbox_pct[2] / 2;
-                      const cy = comp.bbox_pct[1] + comp.bbox_pct[3] / 2;
+                      // Determine styling based on state
+                      let strokeColor = "rgba(99, 102, 241, 0.3)";
+                      let fillColor = "rgba(99, 102, 241, 0.04)";
+                      let strokeW = 0.12;
+                      let labelBg = "#475569";
+
+                      if (isSelected) {
+                        strokeColor = "#10B981";
+                        fillColor = "rgba(16, 185, 129, 0.15)";
+                        strokeW = 0.3;
+                        labelBg = "#10B981";
+                      } else if (isConnected) {
+                        strokeColor = "#6366F1";
+                        fillColor = "rgba(99, 102, 241, 0.12)";
+                        strokeW = 0.25;
+                        labelBg = "#6366F1";
+                      } else if (isHighlighted) {
+                        strokeColor = "#F59E0B";
+                        fillColor = "rgba(245, 158, 11, 0.15)";
+                        strokeW = 0.25;
+                        labelBg = "#F59E0B";
+                      }
+
                       const labelText = comp.designator;
-                      const labelWidth = Math.max(labelText.length * 0.52 + 0.6, 2);
-                      const labelHeight = 1.3;
-
-                      const fillColor = isSelected
-                        ? "#10B981"
-                        : isConnected
-                          ? "#6366F1"
-                          : isHighlighted
-                            ? "#F59E0B"
-                            : "#1E293B";
-
-                      const bgOpacity = isSelected ? 0.95 : isConnected ? 0.9 : isHighlighted ? 0.9 : 0.75;
+                      const labelWidth = Math.max(labelText.length * 0.45 + 0.5, 1.8);
+                      const labelHeight = 1.0;
+                      const labelX = comp.bbox_pct[0] + comp.bbox_pct[2] / 2;
+                      const labelY = comp.bbox_pct[1] - 0.6;
 
                       return (
                         <g
                           key={comp.id}
                           style={{ pointerEvents: "all", cursor: "pointer" }}
-                          opacity={isActive ? 1 : 0.3}
+                          opacity={isActive ? 1 : 0.25}
                           onClick={() => {
                             if (mode === "select") setSelectedComponent(comp);
                           }}
                         >
-                          {/* Small clickable area around the marker */}
+                          {/* Bounding box */}
                           <rect
-                            x={cx - labelWidth / 2 - 0.3}
-                            y={cy - labelHeight / 2 - 0.3}
-                            width={labelWidth + 0.6}
-                            height={labelHeight + 0.6}
-                            fill="transparent"
+                            x={comp.bbox_pct[0]}
+                            y={comp.bbox_pct[1]}
+                            width={comp.bbox_pct[2]}
+                            height={comp.bbox_pct[3]}
+                            fill={fillColor}
+                            stroke={strokeColor}
+                            strokeWidth={strokeW}
+                            rx={0.2}
                           />
-                          {/* Pin background */}
+                          {/* Designator label above bbox */}
                           <rect
-                            x={cx - labelWidth / 2}
-                            y={cy - labelHeight / 2}
+                            x={labelX - labelWidth / 2}
+                            y={labelY - labelHeight / 2}
                             width={labelWidth}
                             height={labelHeight}
-                            rx={0.3}
-                            fill={fillColor}
-                            opacity={bgOpacity}
+                            rx={0.2}
+                            fill={labelBg}
+                            opacity={0.85}
                           />
-                          {/* Pin text */}
                           <text
-                            x={cx}
-                            y={cy + 0.35}
+                            x={labelX}
+                            y={labelY + 0.25}
                             textAnchor="middle"
-                            fontSize={0.8}
+                            fontSize={0.65}
                             fill="white"
                             fontWeight="bold"
                             fontFamily="system-ui, sans-serif"

@@ -69,11 +69,12 @@ def _process_single_page(pdf_bytes: bytes, page_number: int, dpi: int) -> dict:
     is_oversized = page_area_sqin > 200  # > ~14x14 inches (anything bigger than tabloid)
 
     # For oversized pages, reduce DPI to keep pixel count manageable
-    # A 24x36" page at 150 DPI = 3600x5400 = 19MP → Tesseract will timeout
-    # Cap at ~8MP (roughly 4000x2000) which is enough for readable rendering
+    # A 24x36" page at 150 DPI = 3600x5400 = 19MP → too large for Tesseract
+    # Cap at ~20MP — Tesseract is already skipped for oversized pages,
+    # so we keep higher resolution for document viewing quality
     effective_dpi = dpi
     if is_oversized:
-        max_pixels = 8_000_000
+        max_pixels = 20_000_000
         pixels_at_dpi = (page_w_in * dpi) * (page_h_in * dpi)
         if pixels_at_dpi > max_pixels:
             import math
