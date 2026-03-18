@@ -276,7 +276,7 @@ async def retry_manual(manual_id: UUID, request: Request) -> ManualResponse:
 
 @router.post("/{manual_id}/reclassify")
 async def reclassify_manual(manual_id: UUID, request: Request) -> dict:
-    """Re-run AI classification on all pages of a ready manual."""
+    """Re-run AI vision classification on all pages of a ready manual (inline)."""
     role = getattr(request.state, "user_role", None)
     if role not in (UserRole.OWNER, UserRole.MANAGER):
         raise HTTPException(status_code=403, detail="Only owners and managers can reclassify")
@@ -301,31 +301,124 @@ async def reclassify_manual(manual_id: UUID, request: Request) -> dict:
             detail=f"Manual must be 'ready' to reclassify (current: '{row['upload_status']}')"
         )
 
-    # Get all page IDs
+    # Get all pages with their images
     async with pool.acquire() as conn:
-        page_rows = await conn.fetch(
-            "SELECT id FROM pages WHERE manual_id = $1 ORDER BY page_number",
+        pages = await conn.fetch(
+            """SELECT id, page_number, classification, extracted_text, image_url
+               FROM pages WHERE manual_id = $1 ORDER BY page_number""",
             manual_id,
         )
 
-    if not page_rows:
+    if not pages:
         raise HTTPException(status_code=400, detail="No pages to classify")
 
-    page_ids = [str(r["id"]) for r in page_rows]
+    # Run AI vision classification inline (no worker dependency)
+    import anthropic
+    import base64
+    import boto3
 
-    # Use AI vision classification for accurate results
-    from arq.connections import create_pool as create_arq_pool
-    from manualworx_shared.config import arq_redis_settings
-    from ..config import settings
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=settings.AWS_ENDPOINT_URL_S3,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    )
+    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    try:
-        arq_pool = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
-        await arq_pool.enqueue_job("classify_pages", str(manual_id), page_ids)
-        await arq_pool.close()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to enqueue classification: {e}")
+    VALID_CLASSIFICATIONS = {
+        "text", "hydraulic_schematic", "electrical_diagram",
+        "parts_exploded_view", "torque_spec_table", "diagnostic_flowchart",
+        "wiring_harness", "general_illustration",
+    }
 
-    return {"status": "queued", "pages": len(page_ids)}
+    prompt_template = """Classify this heavy equipment service manual page into exactly ONE category.
+
+Look at the IMAGE carefully. Pay special attention to schematic symbols, flow lines, and circuit diagrams.
+
+CATEGORIES:
+- "hydraulic_schematic" — Hydraulic system diagram with ISO symbols: valves, pumps, cylinders, reservoirs, filters, flow lines
+- "electrical_diagram" — Electrical circuit/wiring diagram with switches, relays, fuses, solenoids, ECM connections, wire numbers
+- "wiring_harness" — Physical wire routing paths, connector pinout tables, wire color/gauge charts
+- "diagnostic_flowchart" — Troubleshooting flowchart with yes/no decision branches, fault codes
+- "parts_exploded_view" — Exploded assembly diagram with numbered callout lines and parts list
+- "torque_spec_table" — Page dominated by a specifications table (torque, clearances, pressures)
+- "general_illustration" — Full-page photo, cross-section, cutaway, or location diagram (no circuit symbols)
+- "text" — Primarily written text: procedures, instructions, descriptions. ONLY if NO significant diagrams
+
+If a page has BOTH text AND a diagram, classify by the diagram type — diagrams take priority.
+
+EXTRACTED TEXT: {page_text}
+
+Respond with ONLY the classification label."""
+
+    updated = 0
+    errors = 0
+    semaphore = asyncio.Semaphore(5)  # 5 concurrent API calls
+
+    async def classify_one(page):
+        nonlocal updated, errors
+        image_key = page["image_url"]
+        if not image_key:
+            image_key = f"manuals/{tenant_id}/{manual_id}/pages/{page['page_number']}.png"
+
+        try:
+            obj = s3.get_object(Bucket=settings.BUCKET_NAME, Key=image_key)
+            image_bytes = obj["Body"].read()
+        except Exception as e:
+            logger.warning("Failed to fetch image for page %d: %s", page["page_number"], e)
+            errors += 1
+            return
+
+        if len(image_bytes) < 100:
+            errors += 1
+            return
+
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        page_text = (page["extracted_text"] or "")[:1000]
+
+        async with semaphore:
+            try:
+                response = await client.messages.create(
+                    model=settings.DEFAULT_MODEL,
+                    max_tokens=50,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": image_b64}},
+                            {"type": "text", "text": prompt_template.format(page_text=page_text or "(no text)")},
+                        ],
+                    }],
+                )
+                result = response.content[0].text.strip().lower()
+
+                # Validate
+                if result not in VALID_CLASSIFICATIONS:
+                    for valid in VALID_CLASSIFICATIONS:
+                        if valid in result:
+                            result = valid
+                            break
+                    else:
+                        logger.warning("Page %d: unrecognized classification '%s'", page["page_number"], result)
+                        return
+
+                if result != page["classification"]:
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE pages SET classification = $1 WHERE id = $2",
+                            result, page["id"],
+                        )
+                    updated += 1
+            except Exception as e:
+                logger.warning("Classification failed for page %d: %s", page["page_number"], e)
+                errors += 1
+
+    # Process all pages concurrently with semaphore
+    await asyncio.gather(*[classify_one(p) for p in pages])
+
+    logger.info("Reclassified manual %s: %d/%d updated, %d errors",
+                str(manual_id)[:8], updated, len(pages), errors)
+
+    return {"status": "completed", "pages": len(pages), "updated": updated, "errors": errors}
 
 
 @router.get("/{manual_id}/search")

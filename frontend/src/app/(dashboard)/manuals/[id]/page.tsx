@@ -195,55 +195,19 @@ export default function ManualDetailPage() {
   const handleReclassify = async () => {
     setReclassifying(true);
     try {
-      const result = await api.post<{ pages: number }>(`/api/manuals/${manualId}/reclassify`);
-      toast.success(`Reclassifying ${result.pages} pages with AI vision — this may take a few minutes...`);
-
-      // Snapshot current classifications to detect changes
-      const initialClassifications = new Map(
-        pages.map((p) => [p.id, p.classification])
+      toast.info("Reclassifying pages with AI vision — this may take several minutes...");
+      const result = await api.post<{ pages: number; updated: number; errors: number }>(
+        `/api/manuals/${manualId}/reclassify`,
+        undefined,
+        { timeout: 600_000, retries: 0 }
       );
-      let pollCount = 0;
-      const maxPolls = 120; // 10 minutes max (5s intervals)
-
-      const poll = setInterval(async () => {
-        pollCount++;
-        try {
-          const p = await api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []);
-          setPages(p);
-
-          // Count how many pages changed classification
-          const changedCount = p.filter(
-            (pg) => initialClassifications.get(pg.id) !== pg.classification
-          ).length;
-
-          // Consider done when changes have been detected AND stabilized,
-          // or when we've polled enough times
-          if (changedCount > 0 && pollCount >= 3) {
-            // Wait 2 more polls to see if count is still changing
-            const prevChanged = changedCount;
-            setTimeout(async () => {
-              const final = await api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []);
-              setPages(final);
-              const finalChanged = final.filter(
-                (pg) => initialClassifications.get(pg.id) !== pg.classification
-              ).length;
-              if (finalChanged === prevChanged || pollCount >= maxPolls) {
-                clearInterval(poll);
-                setReclassifying(false);
-                toast.success(`Reclassification complete — ${finalChanged} pages updated`);
-              }
-            }, 10000);
-          }
-
-          if (pollCount >= maxPolls) {
-            clearInterval(poll);
-            setReclassifying(false);
-            toast.success(`Reclassification complete — ${changedCount} pages updated`);
-          }
-        } catch {}
-      }, 5000);
+      toast.success(`Reclassification complete — ${result.updated} of ${result.pages} pages updated`);
+      // Refresh pages to show new classifications
+      const p = await api.get<Page[]>(`/api/manuals/${manualId}/pages`).catch(() => []);
+      setPages(p);
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to start reclassification");
+      toast.error(e instanceof Error ? e.message : "Failed to reclassify");
+    } finally {
       setReclassifying(false);
     }
   };
