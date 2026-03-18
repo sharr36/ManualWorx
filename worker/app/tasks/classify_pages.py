@@ -63,6 +63,8 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
 
     # Build page data with images for batch classification
     page_data_list = []
+    images_fetched = 0
+    images_failed = 0
     for page in pages:
         image_key = page["image_url"]
         if not image_key:
@@ -77,10 +79,14 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
             if len(image_bytes) < 100:
                 logger.warning("Page %d image suspiciously small (%d bytes): %s",
                                page["page_number"], len(image_bytes), image_key)
+                images_failed += 1
+            else:
+                images_fetched += 1
         except Exception as e:
             logger.error("Failed to fetch page %d image from S3 key '%s': %s: %s",
                          page["page_number"], image_key, type(e).__name__, e)
             image_bytes = b""
+            images_failed += 1
 
         page_data_list.append({
             "page_id": str(page["id"]),
@@ -89,6 +95,9 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
             "text": page["extracted_text"] or "",
             "image_bytes": image_bytes,
         })
+
+    logger.info("[%s] Fetched %d/%d page images (%d failed) for classification",
+                manual_id[:8], images_fetched, len(pages), images_failed)
 
     # Classify pages in batches
     classify_input = [
@@ -135,8 +144,12 @@ async def classify_pages(ctx: dict, manual_id: str, page_ids: list[str]) -> dict
 
         updated += 1
 
-    logger.info("[%s] Classification complete: %d/%d pages updated",
-                manual_id[:8], updated, len(page_ids))
+    # Log classification distribution
+    from collections import Counter
+    old_dist = Counter(pd["old_classification"] for pd in page_data_list)
+    new_dist = Counter(classifications)
+    logger.info("[%s] Classification complete: %d/%d pages updated. Old: %s → New: %s",
+                manual_id[:8], updated, len(page_ids), dict(old_dist), dict(new_dist))
 
     # Auto-enqueue annotation for newly-classified schematic pages
     schematic_types = {
