@@ -407,8 +407,10 @@ export default function ViewerPage() {
                     viewBox="0 0 100 100"
                     preserveAspectRatio="none"
                   >
-                    {/* Connection lines */}
-                    {visibleConnections?.map((conn, i) => {
+                    {/* Connection lines — only show when a component is selected */}
+                    {selectedComponent && visibleConnections?.filter(
+                      (c) => c.from_id === selectedComponent.id || c.to_id === selectedComponent.id
+                    ).map((conn, i) => {
                       const fromComp = annotation.annotation_data.components.find(
                         (c) => c.id === conn.from_id
                       );
@@ -422,11 +424,6 @@ export default function ViewerPage() {
                       const toX = toComp.bbox_pct[0] + toComp.bbox_pct[2] / 2;
                       const toY = toComp.bbox_pct[1] + toComp.bbox_pct[3] / 2;
 
-                      const isActive =
-                        !selectedState ||
-                        (activeComponentIds.has(conn.from_id) &&
-                          activeComponentIds.has(conn.to_id));
-
                       return (
                         <line
                           key={`conn-${i}`}
@@ -435,22 +432,23 @@ export default function ViewerPage() {
                           x2={toX}
                           y2={toY}
                           stroke={getLineColor(conn.line_type)}
-                          strokeWidth={isActive ? 0.4 : 0.15}
-                          opacity={isActive ? 0.8 : 0.2}
-                          strokeDasharray={
-                            conn.line_type === "pilot" || conn.line_type === "signal_data"
-                              ? "0.5 0.3"
-                              : undefined
-                          }
+                          strokeWidth={0.25}
+                          opacity={0.6}
+                          strokeDasharray="0.5 0.3"
                         />
                       );
                     })}
 
-                    {/* Component hotspots */}
+                    {/* Component markers — small pin labels at center of bbox */}
                     {filteredComponents?.map((comp) => {
                       const isActive =
                         !selectedState || activeComponentIds.has(comp.id);
                       const isSelected = selectedComponent?.id === comp.id;
+                      const isConnected = selectedComponent && annotation.annotation_data.connections.some(
+                        (c) =>
+                          (c.from_id === selectedComponent.id && c.to_id === comp.id) ||
+                          (c.to_id === selectedComponent.id && c.from_id === comp.id)
+                      );
                       const isHighlighted =
                         searchTerm &&
                         (comp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -458,45 +456,62 @@ export default function ViewerPage() {
                             .toLowerCase()
                             .includes(searchTerm.toLowerCase()));
 
+                      // Place marker at center of bbox
+                      const cx = comp.bbox_pct[0] + comp.bbox_pct[2] / 2;
+                      const cy = comp.bbox_pct[1] + comp.bbox_pct[3] / 2;
+                      const labelText = comp.designator;
+                      const labelWidth = Math.max(labelText.length * 0.52 + 0.6, 2);
+                      const labelHeight = 1.3;
+
+                      const fillColor = isSelected
+                        ? "#10B981"
+                        : isConnected
+                          ? "#6366F1"
+                          : isHighlighted
+                            ? "#F59E0B"
+                            : "#1E293B";
+
+                      const bgOpacity = isSelected ? 0.95 : isConnected ? 0.9 : isHighlighted ? 0.9 : 0.75;
+
                       return (
-                        <g key={comp.id} style={{ pointerEvents: "all" }}>
+                        <g
+                          key={comp.id}
+                          style={{ pointerEvents: "all", cursor: "pointer" }}
+                          opacity={isActive ? 1 : 0.3}
+                          onClick={() => {
+                            if (mode === "select") setSelectedComponent(comp);
+                          }}
+                        >
+                          {/* Small clickable area around the marker */}
                           <rect
-                            x={comp.bbox_pct[0]}
-                            y={comp.bbox_pct[1]}
-                            width={comp.bbox_pct[2]}
-                            height={comp.bbox_pct[3]}
-                            fill={
-                              isSelected
-                                ? "rgba(16, 185, 129, 0.25)"
-                                : isHighlighted
-                                  ? "rgba(245, 158, 11, 0.3)"
-                                  : "rgba(99, 102, 241, 0.08)"
-                            }
-                            stroke={
-                              isSelected
-                                ? "#10B981"
-                                : isHighlighted
-                                  ? "#F59E0B"
-                                  : "rgba(99, 102, 241, 0.3)"
-                            }
-                            strokeWidth={isSelected || isHighlighted ? 0.3 : 0.15}
-                            opacity={isActive ? 1 : 0.3}
-                            rx={0.3}
-                            className="cursor-pointer"
-                            onClick={() => {
-                              if (mode === "select") setSelectedComponent(comp);
-                            }}
+                            x={cx - labelWidth / 2 - 0.3}
+                            y={cy - labelHeight / 2 - 0.3}
+                            width={labelWidth + 0.6}
+                            height={labelHeight + 0.6}
+                            fill="transparent"
                           />
+                          {/* Pin background */}
+                          <rect
+                            x={cx - labelWidth / 2}
+                            y={cy - labelHeight / 2}
+                            width={labelWidth}
+                            height={labelHeight}
+                            rx={0.3}
+                            fill={fillColor}
+                            opacity={bgOpacity}
+                          />
+                          {/* Pin text */}
                           <text
-                            x={comp.bbox_pct[0] + comp.bbox_pct[2] / 2}
-                            y={comp.bbox_pct[1] - 0.3}
+                            x={cx}
+                            y={cy + 0.35}
                             textAnchor="middle"
-                            fontSize={0.9}
-                            fill={isActive ? "#1E293B" : "#94A3B8"}
+                            fontSize={0.8}
+                            fill="white"
                             fontWeight="bold"
+                            fontFamily="system-ui, sans-serif"
                             style={{ pointerEvents: "none" }}
                           >
-                            {comp.designator}
+                            {labelText}
                           </text>
                         </g>
                       );
