@@ -31,7 +31,7 @@ class WorkerSettings(BaseSettings):
     EMBEDDING_DIMENSION: int = 1024
 
     # Classification
-    CLASSIFICATION_MODEL: str = "claude-haiku-4-5-20251001"
+    CLASSIFICATION_MODEL: str = "claude-sonnet-4-5-20250929"
 
     # Processing
     PDF_DPI: int = 150

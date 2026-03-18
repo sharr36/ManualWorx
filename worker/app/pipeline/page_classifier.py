@@ -14,28 +14,25 @@ logger = logging.getLogger(__name__)
 
 CLASSIFICATION_PROMPT = """You are classifying pages from a heavy equipment service manual. Classify this page into exactly ONE category.
 
-Look at the IMAGE carefully — text alone is not sufficient. Pay special attention to schematic symbols, flow lines, and circuit diagrams.
+Look at the IMAGE carefully — text alone is not sufficient. Pay special attention to schematic symbols, flow lines, circuit diagrams, and page layout.
 
 CATEGORIES:
-- "hydraulic_schematic" — Page contains a HYDRAULIC SYSTEM DIAGRAM with schematic symbols: flow lines, valve symbols, pump symbols, cylinders, reservoirs, pressure gauges, filters. These are engineering schematics showing fluid flow paths. Even if there is some text labeling components, if the PRIMARY content is a hydraulic circuit diagram, use this.
-- "electrical_diagram" — Page contains an ELECTRICAL/WIRING DIAGRAM with circuit symbols: wires, connectors, relays, fuses, ECM pinouts, switches, resistors, ground symbols. Even with component labels/text, if it shows electrical circuits, use this.
-- "wiring_harness" — Page shows WIRING HARNESS routing paths, connector pinout tables, or wire color/gauge charts.
-- "diagnostic_flowchart" — Page shows a TROUBLESHOOTING FLOWCHART or diagnostic decision tree with yes/no branches, fault codes, or step-by-step diagnostic procedures in a flowchart format.
-- "parts_exploded_view" — Page shows an EXPLODED PARTS VIEW: an assembly/disassembly diagram with numbered callouts pointing to individual parts, usually with a parts list.
-- "torque_spec_table" — Page is dominated by a TABLE of torque specs, clearances, tolerances, pressures, or measurement values.
-- "general_illustration" — Page is a FULL-PAGE photo, cross-section drawing, or cutaway illustration that does NOT fit the above categories. Must have minimal text.
-- "text" — Page is PRIMARILY TEXT: procedures, instructions, descriptions, specifications written in paragraphs or numbered steps. Use this ONLY when the page has NO significant diagrams or schematics.
+- "hydraulic_schematic" — HYDRAULIC SYSTEM DIAGRAM with ISO hydraulic symbols: directional control valves (rectangles with arrows/ports), pumps (circles with triangles), cylinders (rectangles with pistons), check valves, relief valves, flow control valves, reservoirs, filters, accumulators. Connected by lines representing pressure/return/pilot/drain lines. These show fluid flow paths through a hydraulic system.
+- "electrical_diagram" — ELECTRICAL CIRCUIT/WIRING DIAGRAM showing electrical circuits with standard symbols: switches, relays, fuses, resistors, solenoids, motors, batteries, grounds, ECM/ECU connections. Lines represent wires, often labeled with wire numbers or colors. Shows how electrical components are connected in circuits.
+- "wiring_harness" — WIRING HARNESS layout showing physical wire routing paths on the machine, connector pinout tables/charts, wire color codes, or splice locations. Distinguished from electrical_diagram by showing physical routing rather than circuit logic.
+- "diagnostic_flowchart" — TROUBLESHOOTING FLOWCHART with decision diamonds (yes/no branches), fault code tables, or step-by-step diagnostic procedures arranged as a visual flow. Must have branching logic or decision trees.
+- "parts_exploded_view" — EXPLODED PARTS DIAGRAM showing components pulled apart with numbered callout lines pointing to individual parts. Usually accompanied by a parts list with item numbers, part numbers, and descriptions.
+- "torque_spec_table" — Page DOMINATED by a specifications TABLE: torque values, clearances, tolerances, pressures, capacities, or measurement data arranged in rows and columns. The table must be the primary content.
+- "general_illustration" — FULL-PAGE photo, cross-section cutaway, location diagram, or machine overview illustration that does NOT contain schematic circuit symbols. Photos of actual components, location callouts on machine photos, or cross-section drawings go here.
+- "text" — PRIMARILY TEXT content: written procedures, descriptions, maintenance instructions, or general information in paragraphs, numbered steps, or bullet points. Use ONLY when the page has NO significant diagrams, schematics, or illustrations.
 
-DECISION PRIORITY:
-1. If you see schematic symbols (valves, pumps, circuit elements, flow arrows) → hydraulic_schematic or electrical_diagram
-2. If you see a flowchart with decision branches → diagnostic_flowchart
-3. If you see exploded parts with callout numbers → parts_exploded_view
-4. If you see a data table filling most of the page → torque_spec_table
-5. If you see wiring routes or connector tables → wiring_harness
-6. If mostly a large image/photo with minimal text → general_illustration
-7. Only if NONE of the above apply → text
+KEY DISTINCTIONS:
+- Hydraulic vs Electrical: Hydraulic schematics use ISO fluid power symbols (valve blocks, pump circles, cylinder rectangles). Electrical diagrams use circuit symbols (relay coils, switch contacts, fuse symbols, ground triangles).
+- Electrical diagram vs Wiring harness: Electrical diagrams show circuit LOGIC (how components are electrically connected). Wiring harness shows PHYSICAL routing (where wires run on the machine) or connector pin assignments.
+- If a page has BOTH text AND a diagram, classify by the diagram type — the diagram takes priority.
+- Large foldout pages with dense circuit drawings are almost always hydraulic_schematic or electrical_diagram.
 
-EXTRACTED TEXT FROM THIS PAGE:
+EXTRACTED TEXT FROM THIS PAGE (for context only — rely primarily on the IMAGE):
 {page_text}
 
 Respond with ONLY the classification label, nothing else."""

@@ -313,14 +313,14 @@ async def reclassify_manual(manual_id: UUID, request: Request) -> dict:
 
     page_ids = [str(r["id"]) for r in page_rows]
 
-    # Use fast heuristic reclassification (no AI cost, instant)
+    # Use AI vision classification for accurate results
     from arq.connections import create_pool as create_arq_pool
     from manualworx_shared.config import arq_redis_settings
     from ..config import settings
 
     try:
         arq_pool = await create_arq_pool(arq_redis_settings(settings.REDIS_URL))
-        await arq_pool.enqueue_job("reclassify_heuristic", str(manual_id))
+        await arq_pool.enqueue_job("classify_pages", str(manual_id), page_ids)
         await arq_pool.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to enqueue classification: {e}")
