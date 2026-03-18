@@ -27,6 +27,7 @@ import type {
   DiagramAnnotation,
   DiagramComponent,
   DiagramPageItem,
+  Manual,
   OperatingState,
 } from "@/types";
 
@@ -84,6 +85,8 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
 type ViewerMode = "select" | "pan";
 
 export default function ViewerPage() {
+  const [manuals, setManuals] = useState<Manual[]>([]);
+  const [selectedManualId, setSelectedManualId] = useState<string>("");
   const [diagramPages, setDiagramPages] = useState<DiagramPageItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPage, setSelectedPage] = useState<DiagramPageItem | null>(null);
@@ -107,20 +110,35 @@ export default function ViewerPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
-  // Load diagram pages
+  // Load manuals list
   useEffect(() => {
-    async function load() {
-      try {
-        const pages = await api.get<DiagramPageItem[]>("/api/viewer/diagrams");
-        setDiagramPages(pages);
-      } catch {
-        setDiagramPages([]);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
+    api
+      .get<Manual[]>("/api/manuals")
+      .then((data) => {
+        const ready = data.filter((m) => m.upload_status === "ready");
+        setManuals(ready);
+        // Auto-select first manual if only one
+        if (ready.length === 1) setSelectedManualId(ready[0].id);
+      })
+      .catch(() => setManuals([]))
+      .finally(() => setLoading(false));
   }, []);
+
+  // Load diagram pages when manual selection changes
+  useEffect(() => {
+    if (!selectedManualId) {
+      setDiagramPages([]);
+      return;
+    }
+    setLoading(true);
+    setSelectedPage(null);
+    setAnnotation(null);
+    api
+      .get<DiagramPageItem[]>(`/api/viewer/diagrams?manual_id=${selectedManualId}`)
+      .then(setDiagramPages)
+      .catch(() => setDiagramPages([]))
+      .finally(() => setLoading(false));
+  }, [selectedManualId]);
 
   // Load annotations when page selected
   const loadAnnotation = useCallback(async (page: DiagramPageItem) => {
@@ -163,15 +181,17 @@ export default function ViewerPage() {
     [loadAnnotation]
   );
 
-  const handleAnnotate = async () => {
+  const handleAnnotate = async (force = false) => {
     if (!selectedPage) return;
+    // Clear existing annotation so user sees loading state and errors
+    setAnnotation(null);
     setAnnotating(true);
     setAnnotationError(null);
     try {
       const result = await api.post<DiagramAnnotation>("/api/viewer/annotate", {
         page_id: selectedPage.page_id,
-        force: true,
-      }, { timeout: 120_000 });
+        ...(force ? { force: true } : {}),
+      }, { timeout: 180_000 });
       setAnnotation(result);
       setDiagramPages((prev) =>
         prev.map((p) =>
@@ -553,15 +573,37 @@ export default function ViewerPage() {
 
       <div className="flex gap-3">
         {/* Diagram selector sidebar */}
-        <div className="w-52 shrink-0 space-y-1.5 overflow-y-auto" style={{ maxHeight: isFullscreen ? "calc(100vh - 80px)" : "calc(100vh - 200px)" }}>
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Diagrams</h3>
-          {loading ? (
+        <div className="w-52 shrink-0 space-y-2 overflow-y-auto" style={{ maxHeight: isFullscreen ? "calc(100vh - 80px)" : "calc(100vh - 200px)" }}>
+          {/* Manual selector */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Manual
+            </label>
+            <select
+              className="mt-1 w-full rounded-md border bg-white px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              value={selectedManualId}
+              onChange={(e) => setSelectedManualId(e.target.value)}
+            >
+              <option value="">Select a manual...</option>
+              {manuals.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {!selectedManualId ? (
+            <p className="text-xs text-muted-foreground py-4 text-center">
+              Select a manual above to view its diagrams.
+            </p>
+          ) : loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : diagramPages.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              No diagram pages found. Upload a manual with schematics.
+              No diagram pages found in this manual.
             </p>
           ) : (
             diagramPages.map((page) => (
@@ -601,8 +643,12 @@ export default function ViewerPage() {
           {!selectedPage ? (
             <EmptyState
               icon={Image}
-              title="Select a diagram"
-              description="Choose a schematic or diagram from the sidebar to view and annotate it."
+              title={selectedManualId ? "Select a diagram" : "Select a manual"}
+              description={
+                selectedManualId
+                  ? "Choose a schematic or diagram from the sidebar to view and annotate it."
+                  : "Choose a manual from the sidebar dropdown to get started."
+              }
             />
           ) : (
             <div
@@ -811,7 +857,7 @@ export default function ViewerPage() {
               {/* Annotate button overlay */}
               {!annotation && !annotating && !annotationError && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/5">
-                  <Button onClick={handleAnnotate} size="lg">
+                  <Button onClick={() => handleAnnotate()} size="lg">
                     <Zap className="mr-2 h-4 w-4" />
                     Annotate with AI
                   </Button>
@@ -822,7 +868,7 @@ export default function ViewerPage() {
               {annotation && !annotating && (
                 <div className="absolute top-3 right-3 flex gap-2">
                   <Button
-                    onClick={handleAnnotate}
+                    onClick={() => handleAnnotate(true)}
                     size="sm"
                     variant="outline"
                     className="bg-white/90 shadow-sm text-xs"
@@ -847,7 +893,7 @@ export default function ViewerPage() {
                   <div className="flex flex-col items-center gap-3 rounded-lg bg-white px-6 py-4 shadow-lg max-w-sm">
                     <ZapOff className="h-5 w-5 text-red-500" />
                     <p className="text-sm text-red-600 text-center">{annotationError}</p>
-                    <Button onClick={handleAnnotate} size="sm" variant="outline">
+                    <Button onClick={() => handleAnnotate(true)} size="sm" variant="outline">
                       Retry Annotation
                     </Button>
                   </div>

@@ -559,7 +559,29 @@ export default function QueryPage() {
 
         {/* Input bar */}
         <div className="border-t p-4">
-          <div className="flex gap-2">
+          {/* Manual selector + mode row */}
+          <div className="mb-2 flex items-center gap-2 flex-wrap">
+            <select
+              className="rounded-md border bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              value={selectedManuals.length === 1 ? selectedManuals[0] : ""}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setSelectedManuals([e.target.value]);
+                } else {
+                  setSelectedManuals([]);
+                }
+              }}
+            >
+              <option value="">All manuals</option>
+              {manuals.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.title}
+                </option>
+              ))}
+            </select>
+
+            <div className="h-4 w-px bg-border" />
+
             <div className="hidden gap-1 sm:flex">
               <Button
                 variant="ghost"
@@ -595,10 +617,13 @@ export default function QueryPage() {
                 </Button>
               ))}
             </div>
+          </div>
+
+          <div className="flex gap-2">
             <div className="flex flex-1 gap-2">
               <textarea
                 ref={textareaRef}
-                placeholder="Ask about your equipment manuals..."
+                placeholder={selectedManuals.length > 0 ? "Ask about this manual..." : "Select a manual above, then ask a question..."}
                 className="flex-1 resize-none rounded-lg border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 rows={1}
                 value={input}
