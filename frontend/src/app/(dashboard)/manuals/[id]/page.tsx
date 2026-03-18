@@ -1513,15 +1513,17 @@ function SpecsTab({ manualId, manualReady }: { manualId: string; manualReady: bo
   const extractSpecs = async () => {
     setLoading(true);
     try {
-      const result = await api.post<{ specs: ExtractedSpec[]; total: number }>(
-        `/api/manuals/${manualId}/extract-specs`
+      const result = await api.post<{ specs: ExtractedSpec[]; total: number; pages_analyzed?: number }>(
+        `/api/manuals/${manualId}/extract-specs`,
+        undefined,
+        { timeout: 300_000, retries: 0 }
       );
       setSpecs(result.specs || []);
       setExtracted(true);
       if (result.total === 0) {
         toast.info("No specifications found in this manual");
       } else {
-        toast.success(`Extracted ${result.total} specifications`);
+        toast.success(`Extracted ${result.total} specifications from ${result.pages_analyzed || "?"} pages`);
       }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to extract specifications");
@@ -1565,8 +1567,8 @@ function SpecsTab({ manualId, manualReady }: { manualId: string; manualReady: bo
 
   return (
     <div className="space-y-4">
-      {/* Category filter */}
-      <div className="flex flex-wrap gap-2">
+      {/* Category filter + re-extract */}
+      <div className="flex items-center gap-2 flex-wrap">
         {categories.map((cat) => (
           <Button
             key={cat}
@@ -1577,6 +1579,11 @@ function SpecsTab({ manualId, manualReady }: { manualId: string; manualReady: bo
             {cat === "all" ? `All (${specs.length})` : `${cat} (${specs.filter((s) => s.category === cat).length})`}
           </Button>
         ))}
+        <div className="flex-1" />
+        <Button variant="outline" size="sm" onClick={extractSpecs} disabled={loading}>
+          {loading ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1.5 h-3 w-3" />}
+          Re-extract
+        </Button>
       </div>
 
       {/* Specs table */}

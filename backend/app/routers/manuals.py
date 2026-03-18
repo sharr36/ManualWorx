@@ -2,7 +2,10 @@
 
 import asyncio
 import json
+import logging
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -467,8 +470,7 @@ async def extract_specs(manual_id: UUID, request: Request) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail="Manual not found")
 
-    # Get pages likely to contain specs — search ALL page types, not just text/torque
-    # Specs appear on text pages, schematic pages (callout labels), wiring pages, etc.
+    # Get ALL pages likely to contain specs — no limit
     async with pool.acquire() as conn:
         spec_pages = await conn.fetch(
             """
@@ -488,31 +490,38 @@ async def extract_specs(manual_id: UUID, request: Request) -> dict:
                 OR extracted_text ~* '(\d+\s*(ft[\.\s-]?lb|[Nn][\.\s]?[Mm]|psi|bar|volt|ohm|rpm|°[FC]|gpm|qt|[Ll]))'
               )
             ORDER BY page_number
-            LIMIT 50
             """,
             manual_id,
         )
 
     if not spec_pages:
-        return {"specs": [], "source_pages": []}
+        return {"specs": [], "source_pages": [], "total": 0}
 
-    # Build combined text for AI extraction
-    combined_text = ""
+    machine_desc = f"{row['make'] or ''} {row['model'] or ''}".strip()
+
+    # Process pages in batches to avoid prompt truncation
+    BATCH_SIZE = 15  # ~15 pages * 2000 chars = ~30K chars per batch
+    all_specs: list[dict] = []
     source_pages = []
-    for p in spec_pages:
-        text = p["extracted_text"] or ""
-        if text.strip():
-            combined_text += f"\n--- Page {p['page_number'] + 1} ({p['classification']}) ---\n{text[:2000]}\n"
-            source_pages.append({"page_number": p["page_number"], "classification": p["classification"]})
 
-    if not combined_text.strip():
-        return {"specs": [], "source_pages": []}
-
-    # Use Claude to extract structured specs
     import anthropic
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    prompt = f"""You are a heavy equipment service manual expert. Extract EVERY technical specification from this {row['make'] or ''} {row['model'] or ''} service manual.
+    for batch_start in range(0, len(spec_pages), BATCH_SIZE):
+        batch = spec_pages[batch_start:batch_start + BATCH_SIZE]
+
+        combined_text = ""
+        for p in batch:
+            text = (p["extracted_text"] or "").strip()
+            if text:
+                combined_text += f"\n--- Page {p['page_number'] + 1} ({p['classification']}) ---\n{text[:3000]}\n"
+                if batch_start == 0 or p["page_number"] not in [sp["page_number"] for sp in source_pages]:
+                    source_pages.append({"page_number": p["page_number"], "classification": p["classification"]})
+
+        if not combined_text.strip():
+            continue
+
+        prompt = f"""You are a heavy equipment service manual expert. Extract EVERY technical specification from these {machine_desc} service manual pages.
 
 IMPORTANT: Be thorough. A mechanic needs these specs to service the machine. Look for:
 
@@ -545,34 +554,45 @@ Return a JSON array. Each spec:
 - "page": the page number
 
 Only include values explicitly stated in the text. Do not guess.
+If no specs are found in this text, return an empty array: []
 
 TEXT:
-{combined_text[:16000]}
+{combined_text}
 
 Return ONLY a JSON array. No markdown, no explanation."""
 
-    try:
-        response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text_result = response.content[0].text.strip()
+        try:
+            response = await client.messages.create(
+                model=settings.DEFAULT_MODEL,
+                max_tokens=8192,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text_result = response.content[0].text.strip()
 
-        # Parse JSON
-        start = text_result.find("[")
-        end = text_result.rfind("]") + 1
-        if start >= 0 and end > start:
-            specs = json.loads(text_result[start:end])
-        else:
-            specs = []
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI extraction failed: {e}")
+            start = text_result.find("[")
+            end = text_result.rfind("]") + 1
+            if start >= 0 and end > start:
+                batch_specs = json.loads(text_result[start:end])
+                all_specs.extend(batch_specs)
+        except Exception as e:
+            logger.warning("Spec extraction failed for batch starting at page %s: %s",
+                         batch[0]["page_number"] if batch else "?", e)
+            continue
+
+    # Deduplicate specs by component+spec value
+    seen = set()
+    unique_specs = []
+    for s in all_specs:
+        key = (s.get("component", "").lower().strip(), s.get("spec", "").lower().strip())
+        if key not in seen:
+            seen.add(key)
+            unique_specs.append(s)
 
     return {
-        "specs": specs,
+        "specs": unique_specs,
         "source_pages": source_pages,
-        "total": len(specs),
+        "total": len(unique_specs),
+        "pages_analyzed": len(spec_pages),
     }
 
 
