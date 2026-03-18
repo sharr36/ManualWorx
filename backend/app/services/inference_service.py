@@ -63,7 +63,10 @@ Include components that are:
 - Explicitly named with part numbers/designators
 - Referenced in procedures (e.g. "remove the filter" implies a filter exists)
 - Visible in diagrams or schematics
-- Implied by system descriptions (e.g. "closed-center hydraulic system" implies certain valve types)"""
+- Implied by system descriptions (e.g. "closed-center hydraulic system" implies certain valve types)
+
+For specs, capture ALL values you find: torque specs, pressures, voltages, clearances, capacities, flow rates, temperatures, RPMs.
+If a spec is mentioned in a procedure step (e.g. "Tighten bolts to 85 ft-lbs"), include it in the component's specs."""
 
 GAP_DETECTION_PROMPT = """Analyze this manual's content to identify documentation gaps that could impact a mechanic's ability to service the equipment.
 
@@ -100,15 +103,27 @@ Identify gaps and return JSON:
   ]
 }}"""
 
-TEXT_ANALYSIS_PROMPT = """Analyze this service manual page text and extract structured information.
+TEXT_ANALYSIS_PROMPT = """You are analyzing a service manual page for heavy equipment. Extract ALL structured information, especially technical specifications.
 
 Page {page_number} [{classification}] from "{manual_title}":
 {page_text}
 
+IMPORTANT: Look carefully for ALL specifications including:
+- Torque values (ft-lbs, Nm, in-lbs) — bolt torques, fastener specs, tightening sequences
+- Pressures (PSI, bar, kPa) — hydraulic pressures, relief valve settings, charge pressures, system pressures
+- Voltages and electrical specs (V, A, ohms) — battery voltage, alternator output, sensor readings, resistance values
+- Clearances and tolerances (mm, in, thou) — bearing clearances, end play, backlash, wear limits
+- Fluid capacities (qt, L, gal) — oil capacity, coolant capacity, hydraulic reservoir
+- Temperatures (°F, °C) — operating temps, thermostat ratings, overheat thresholds
+- Flow rates (GPM, LPM) — pump flow, hydraulic circuit flows
+- Speeds (RPM) — engine speed, PTO speed, pump speed
+
+Also look for values embedded in sentences like "Tighten to 45 ft-lbs" or "Relief pressure: 2500 PSI" or "Clearance should be 0.002-0.005 in."
+
 Extract and return JSON:
 {{
   "specs": [
-    {{"name": "spec name", "value": "value with units", "context": "where this applies"}}
+    {{"name": "spec name", "value": "value with units", "category": "torque|pressure|voltage|clearance|capacity|temperature|flow|speed|other", "context": "where/what this applies to"}}
   ],
   "safety_warnings": [
     {{"text": "warning text", "severity": "danger|warning|caution|notice"}}
@@ -304,6 +319,7 @@ class InferenceService:
 
         # Fetch relevant pages
         async with pool.acquire() as conn:
+            await set_tenant_context(conn, tenant_id)
             pages = await conn.fetch(
                 """SELECT p.page_number, p.classification, p.extracted_text
                    FROM pages p
@@ -347,7 +363,7 @@ class InferenceService:
         # Store inferred components
         stored = []
         async with pool.acquire() as conn:
-            await set_tenant_context(conn, tenant_id)
+            await set_tenant_context(conn, tenant_id)  # RLS: allow INSERT into inferred_components
             for comp in components:
                 comp_id = uuid4()
                 await conn.execute(

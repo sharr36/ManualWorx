@@ -1,5 +1,6 @@
 """Confidence analysis and inference endpoints (Phase 6)."""
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
@@ -7,6 +8,8 @@ from pydantic import BaseModel
 
 from ..services.confidence_service import ConfidenceService
 from ..services.inference_service import InferenceService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analyze", tags=["analysis"])
 _inference = InferenceService()
@@ -136,9 +139,16 @@ async def infer_components(body: ComponentInferRequest, request: Request) -> dic
     pool = request.app.state.db_pool
     tenant_id = request.state.tenant_id
 
-    result = await _inference.infer_components(
-        pool, tenant_id, body.manual_id, body.system_area
-    )
+    try:
+        result = await _inference.infer_components(
+            pool, tenant_id, body.manual_id, body.system_area
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Component inference failed for manual %s: %s", body.manual_id, e)
+        raise HTTPException(status_code=500, detail=f"Component inference failed: {e}")
+
     return result
 
 
@@ -152,5 +162,8 @@ async def detect_gaps(body: GapDetectRequest, request: Request) -> dict:
         result = await _inference.detect_gaps(pool, tenant_id, body.manual_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Gap detection failed for manual %s: %s", body.manual_id, e)
+        raise HTTPException(status_code=500, detail=f"Gap detection failed: {e}")
 
     return result
