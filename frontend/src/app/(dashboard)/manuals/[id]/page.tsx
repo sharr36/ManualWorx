@@ -5,12 +5,19 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
+  Eye,
   FileText,
+  Filter,
+  Grid3X3,
   Image as ImageIcon,
+  LayoutList,
   Loader2,
   RefreshCw,
   Search,
   Trash2,
+  Wrench,
   Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -757,7 +764,29 @@ function AnalysisTab({ manualId, manualReady }: { manualId: string; manualReady:
   );
 }
 
-/* ---------- Pages Tab with Search ---------- */
+/* ---------- Pages Tab with Search & Filters ---------- */
+
+const classificationIcons: Record<string, string> = {
+  text: "Aa",
+  hydraulic_schematic: "Hy",
+  electrical_diagram: "El",
+  parts_exploded_view: "Pt",
+  torque_spec_table: "Tq",
+  diagnostic_flowchart: "Dx",
+  wiring_harness: "Wr",
+  general_illustration: "Il",
+};
+
+const classificationColors: Record<string, string> = {
+  text: "bg-slate-100 text-slate-700",
+  hydraulic_schematic: "bg-blue-100 text-blue-800",
+  electrical_diagram: "bg-yellow-100 text-yellow-800",
+  parts_exploded_view: "bg-purple-100 text-purple-800",
+  torque_spec_table: "bg-red-100 text-red-800",
+  diagnostic_flowchart: "bg-orange-100 text-orange-800",
+  wiring_harness: "bg-amber-100 text-amber-800",
+  general_illustration: "bg-emerald-100 text-emerald-800",
+};
 
 interface SearchResult {
   page_id: string;
@@ -785,6 +814,8 @@ function PagesTab({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [filterType, setFilterType] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const searchTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const handleSearch = useCallback(
@@ -812,6 +843,22 @@ function PagesTab({
     [manualId]
   );
 
+  // Build classification counts for filter chips
+  const classCounts: Record<string, number> = {};
+  for (const p of pages) {
+    const cls = p.classification || "text";
+    classCounts[cls] = (classCounts[cls] || 0) + 1;
+  }
+
+  // Apply filters
+  const filteredPages = filterType === "all"
+    ? pages
+    : pages.filter((p) => (p.classification || "text") === filterType);
+
+  // Group pages by classification for grouped view
+  const isDiagramType = (cls: string) =>
+    ["hydraulic_schematic", "electrical_diagram", "parts_exploded_view", "wiring_harness", "diagnostic_flowchart"].includes(cls);
+
   const displayPages = searchResults
     ? searchResults.map((sr) => {
         const page = pages.find((p) => p.id === sr.page_id);
@@ -820,36 +867,90 @@ function PagesTab({
     : null;
 
   return (
-    <div className="space-y-3">
-      {/* Search bar */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search all pages..."
-          value={searchQuery}
-          onChange={(e) => handleSearch(e.target.value)}
-          className="pl-10"
-        />
-        {searching && (
-          <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-        )}
+    <div className="space-y-4">
+      {/* Toolbar: search + filters + view toggle */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          {/* Search bar */}
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search page content..."
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="pl-10"
+            />
+            {searching && (
+              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+            )}
+          </div>
+
+          {/* View toggle */}
+          <div className="flex rounded-md border">
+            <Button
+              variant={viewMode === "list" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("list")}
+              title="List view"
+            >
+              <LayoutList className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant={viewMode === "grid" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("grid")}
+              title="Grid view"
+            >
+              <Grid3X3 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Classification filter chips */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+          <Button
+            variant={filterType === "all" ? "default" : "outline"}
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setFilterType("all")}
+          >
+            All ({pages.length})
+          </Button>
+          {Object.entries(classCounts)
+            .sort(([, a], [, b]) => b - a)
+            .map(([cls, count]) => (
+              <Button
+                key={cls}
+                variant={filterType === cls ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setFilterType(filterType === cls ? "all" : cls)}
+              >
+                <span className={`mr-1.5 inline-flex h-4 w-4 items-center justify-center rounded text-[9px] font-bold ${classificationColors[cls] || "bg-slate-100 text-slate-700"}`}>
+                  {classificationIcons[cls]?.charAt(0) || "?"}
+                </span>
+                {classificationLabels[cls] || cls} ({count})
+              </Button>
+            ))}
+        </div>
       </div>
 
       {searchResults !== null && (
         <p className="text-xs text-muted-foreground">
-          {searchResults.length} page{searchResults.length !== 1 ? "s" : ""} matching &quot;{searchQuery}&quot;
+          {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for &quot;{searchQuery}&quot;
         </p>
       )}
 
-      {/* Search results or all pages */}
+      {/* Search results */}
       {displayPages ? (
         displayPages.length > 0 ? (
           <div className="space-y-2">
             {displayPages.map((sr) => (
-              <Card key={sr.page_id}>
+              <Card key={sr.page_id} className="overflow-hidden transition-shadow hover:shadow-md">
                 <CardContent className="flex items-start gap-4 p-4">
                   <button
-                    className="shrink-0 overflow-hidden rounded border bg-slate-100"
+                    className="shrink-0 overflow-hidden rounded-lg border bg-slate-50 shadow-sm transition-transform hover:scale-105"
                     onClick={() =>
                       setExpandedImage(expandedImage === sr.page_number ? null : sr.page_number)
                     }
@@ -859,34 +960,42 @@ function PagesTab({
                     <img
                       src={`${apiBase}/api/manuals/${manualId}/pages/${sr.page_number}/image`}
                       alt={`Page ${sr.page_number + 1}`}
-                      className="h-16 w-12 object-cover"
+                      className="h-20 w-16 object-cover"
                       loading="lazy"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
                   </button>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary" className="shrink-0">p.{sr.page_number + 1}</Badge>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-sm font-semibold text-slate-900">Page {sr.page_number + 1}</span>
+                      <Badge className={`text-[10px] ${classificationColors[sr.classification] || classificationColors.text}`}>
                         {classificationLabels[sr.classification] || sr.classification}
-                      </span>
+                      </Badge>
                       <Badge variant="outline" className="text-[10px]">
-                        relevance: {(sr.rank * 100).toFixed(0)}%
+                        {(sr.rank * 100).toFixed(0)}% match
                       </Badge>
                     </div>
                     <p
-                      className="mt-1 text-xs text-slate-600"
+                      className="mt-1.5 text-sm leading-relaxed text-slate-600"
                       dangerouslySetInnerHTML={{ __html: sr.snippet }}
                     />
                   </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setExpandedImage(expandedImage === sr.page_number ? null : sr.page_number)}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
                 </CardContent>
                 {expandedImage === sr.page_number && (
-                  <div className="border-t p-4">
+                  <div className="border-t bg-slate-50 p-6">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`${apiBase}/api/manuals/${manualId}/pages/${sr.page_number}/image`}
                       alt={`Page ${sr.page_number + 1} full`}
-                      className="mx-auto max-h-[70vh] rounded border shadow-sm"
+                      className="mx-auto max-h-[70vh] rounded-lg border shadow-md"
                     />
                   </div>
                 )}
@@ -898,57 +1007,169 @@ function PagesTab({
             No pages match your search.
           </p>
         )
-      ) : pages.length > 0 ? (
-        <div className="space-y-2">
-          {pages.map((page) => (
-            <Card key={page.id}>
-              <CardContent className="flex items-start gap-4 p-4">
-                <button
-                  className="shrink-0 overflow-hidden rounded border bg-slate-100"
-                  onClick={() =>
-                    setExpandedImage(expandedImage === page.page_number ? null : page.page_number)
-                  }
-                  title="Click to expand"
+      ) : filteredPages.length > 0 ? (
+        viewMode === "grid" ? (
+          /* Grid view — thumbnails with classification badges */
+          <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {filteredPages.map((page) => {
+              const cls = page.classification || "text";
+              return (
+                <Card
+                  key={page.id}
+                  className={`cursor-pointer overflow-hidden transition-all hover:shadow-md ${
+                    expandedImage === page.page_number ? "ring-2 ring-emerald-500" : ""
+                  }`}
+                  onClick={() => setExpandedImage(expandedImage === page.page_number ? null : page.page_number)}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
-                    alt={`Page ${page.page_number + 1}`}
-                    className="h-16 w-12 object-cover"
-                    loading="lazy"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="shrink-0">p.{page.page_number + 1}</Badge>
-                    <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">
-                      {classificationLabels[page.classification] || page.classification}
-                    </span>
-                    {page.has_table && <Badge variant="outline" className="text-xs">Table</Badge>}
-                    {page.has_diagram && <Badge variant="outline" className="text-xs">Diagram</Badge>}
+                  <div className="relative bg-slate-50">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                      alt={`Page ${page.page_number + 1}`}
+                      className="h-36 w-full object-contain"
+                      loading="lazy"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                    {/* Page number overlay */}
+                    <div className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                      {page.page_number + 1}
+                    </div>
+                    {/* Type badge overlay */}
+                    {isDiagramType(cls) && (
+                      <div className="absolute bottom-1.5 right-1.5">
+                        <Badge className={`text-[9px] ${classificationColors[cls] || classificationColors.text}`}>
+                          {classificationLabels[cls]?.split(" ")[0] || cls}
+                        </Badge>
+                      </div>
+                    )}
                   </div>
-                  {page.extracted_text && (
-                    <p className="mt-1 line-clamp-3 text-xs text-slate-600">{page.extracted_text}</p>
+                  <CardContent className="p-2">
+                    <div className="flex items-center gap-1">
+                      <Badge className={`text-[9px] ${classificationColors[cls] || classificationColors.text}`}>
+                        {classificationLabels[cls] || cls}
+                      </Badge>
+                      {page.has_table && <Badge variant="outline" className="text-[9px]">Tbl</Badge>}
+                      {page.has_diagram && <Badge variant="outline" className="text-[9px]">Dia</Badge>}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          /* List view — detailed cards */
+          <div className="space-y-2">
+            {filteredPages.map((page) => {
+              const cls = page.classification || "text";
+              return (
+                <Card key={page.id} className="overflow-hidden transition-shadow hover:shadow-md">
+                  <CardContent className="flex items-start gap-4 p-4">
+                    <button
+                      className="shrink-0 overflow-hidden rounded-lg border bg-slate-50 shadow-sm transition-transform hover:scale-105"
+                      onClick={() =>
+                        setExpandedImage(expandedImage === page.page_number ? null : page.page_number)
+                      }
+                      title="Click to expand"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                        alt={`Page ${page.page_number + 1}`}
+                        className="h-24 w-[4.5rem] object-cover"
+                        loading="lazy"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-900">Page {page.page_number + 1}</span>
+                        <Badge className={`text-[10px] ${classificationColors[cls] || classificationColors.text}`}>
+                          {classificationLabels[cls] || cls}
+                        </Badge>
+                        {page.has_table && (
+                          <Badge variant="outline" className="text-[10px]">
+                            <Grid3X3 className="mr-0.5 h-2.5 w-2.5" /> Table
+                          </Badge>
+                        )}
+                        {page.has_diagram && (
+                          <Badge variant="outline" className="text-[10px]">
+                            <ImageIcon className="mr-0.5 h-2.5 w-2.5" /> Diagram
+                          </Badge>
+                        )}
+                      </div>
+                      {page.extracted_text && (
+                        <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-slate-600">
+                          {page.extracted_text}
+                        </p>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => setExpandedImage(expandedImage === page.page_number ? null : page.page_number)}
+                    >
+                      {expandedImage === page.page_number ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </CardContent>
+                  {expandedImage === page.page_number && (
+                    <div className="border-t bg-slate-50 p-6">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
+                        alt={`Page ${page.page_number + 1} full`}
+                        className="mx-auto max-h-[70vh] rounded-lg border shadow-md"
+                      />
+                      {page.extracted_text && (
+                        <details className="mx-auto mt-4 max-w-3xl">
+                          <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                            View extracted text
+                          </summary>
+                          <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-4 text-xs text-slate-700 shadow-inner">
+                            {page.extracted_text}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
                   )}
-                </div>
-              </CardContent>
-              {expandedImage === page.page_number && (
-                <div className="border-t p-4">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`${apiBase}/api/manuals/${manualId}/pages/${page.page_number}/image`}
-                    alt={`Page ${page.page_number + 1} full`}
-                    className="mx-auto max-h-[70vh] rounded border shadow-sm"
-                  />
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
+                </Card>
+              );
+            })}
+          </div>
+        )
       ) : (
-        <p className="py-8 text-center text-sm text-muted-foreground">No pages processed yet.</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          {pages.length === 0 ? "No pages processed yet." : "No pages match this filter."}
+        </p>
+      )}
+
+      {/* Full-size image modal */}
+      {expandedImage !== null && viewMode === "grid" && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-8"
+          onClick={() => setExpandedImage(null)}
+        >
+          <div className="relative max-h-full max-w-full" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`${apiBase}/api/manuals/${manualId}/pages/${expandedImage}/image`}
+              alt={`Page ${expandedImage + 1} full`}
+              className="max-h-[85vh] rounded-lg shadow-2xl"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              className="absolute right-2 top-2"
+              onClick={() => setExpandedImage(null)}
+            >
+              Close
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -971,10 +1192,20 @@ interface SchematicEntry {
   annotated_at?: string | null;
 }
 
+const diagramTypeStyles: Record<string, { bg: string; border: string; icon: string }> = {
+  hydraulic_schematic: { bg: "bg-blue-50", border: "border-blue-200", icon: "Hy" },
+  electrical_diagram: { bg: "bg-yellow-50", border: "border-yellow-200", icon: "El" },
+  wiring_harness: { bg: "bg-amber-50", border: "border-amber-200", icon: "Wr" },
+  parts_exploded_view: { bg: "bg-purple-50", border: "border-purple-200", icon: "Pt" },
+  diagnostic_flowchart: { bg: "bg-orange-50", border: "border-orange-200", icon: "Dx" },
+};
+
 function SchematicsTab({ manualId, apiBase }: { manualId: string; apiBase: string }) {
+  const router = useRouter();
   const [schematics, setSchematics] = useState<SchematicEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedSchematic, setExpandedSchematic] = useState<string | null>(null);
+  const [filterType, setFilterType] = useState<string>("all");
 
   useEffect(() => {
     async function load() {
@@ -996,155 +1227,273 @@ function SchematicsTab({ manualId, apiBase }: { manualId: string; apiBase: strin
     return (
       <div className="space-y-3">
         <Skeleton className="h-6 w-48" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-32 w-full" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Skeleton className="h-64 w-full" />
+          <Skeleton className="h-64 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
       </div>
     );
   }
 
   if (schematics.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No schematics or diagrams detected in this manual.
-      </p>
+      <div className="flex flex-col items-center gap-4 py-12">
+        <ImageIcon className="h-12 w-12 text-muted-foreground" />
+        <div className="text-center">
+          <h3 className="font-semibold">No Schematics Found</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This manual doesn&apos;t contain detected schematics or diagrams.
+          </p>
+        </div>
+      </div>
     );
   }
 
   const annotatedCount = schematics.filter((s) => s.annotated).length;
 
+  // Group by classification type
+  const typeCounts: Record<string, number> = {};
+  for (const s of schematics) {
+    const cls = s.classification;
+    typeCounts[cls] = (typeCounts[cls] || 0) + 1;
+  }
+
+  const filtered = filterType === "all"
+    ? schematics
+    : schematics.filter((s) => s.classification === filterType);
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {schematics.length} schematic page{schematics.length !== 1 ? "s" : ""} detected
-          {annotatedCount > 0 && ` — ${annotatedCount} AI-annotated`}.
-          Open in the <a href="/viewer" className="text-emerald-600 underline">Viewer</a> for interactive mode.
-        </p>
+      {/* Summary bar */}
+      <div className="flex items-center justify-between rounded-lg border bg-slate-50 p-3">
+        <div className="flex items-center gap-4">
+          <div className="text-center">
+            <p className="text-xl font-bold">{schematics.length}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Diagrams</p>
+          </div>
+          <div className="h-8 w-px bg-slate-200" />
+          <div className="text-center">
+            <p className="text-xl font-bold text-emerald-600">{annotatedCount}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Annotated</p>
+          </div>
+          <div className="h-8 w-px bg-slate-200" />
+          <div className="flex items-center gap-2">
+            {Object.entries(typeCounts).map(([cls, count]) => (
+              <Badge key={cls} className={`text-[10px] ${classificationColors[cls] || classificationColors.text}`}>
+                {classificationLabels[cls]?.split(" ")[0] || cls}: {count}
+              </Badge>
+            ))}
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => router.push("/viewer")}>
+          <Eye className="mr-2 h-3.5 w-3.5" />
+          Open Viewer
+        </Button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {schematics.map((s) => (
-          <Card key={s.page_id} className={s.annotated ? "border-emerald-200" : ""}>
-            <CardContent className="p-3">
-              {/* Thumbnail */}
-              <button
-                className="w-full overflow-hidden rounded border bg-slate-100"
-                onClick={() => setExpandedSchematic(expandedSchematic === s.page_id ? null : s.page_id)}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`${apiBase}/api/manuals/${manualId}/pages/${s.page_number}/image`}
-                  alt={`Page ${s.page_number + 1}`}
-                  className="h-40 w-full object-contain"
-                  loading="lazy"
-                />
-              </button>
+      {/* Type filter */}
+      {Object.keys(typeCounts).length > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+          <Button
+            variant={filterType === "all" ? "default" : "outline"}
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setFilterType("all")}
+          >
+            All
+          </Button>
+          {Object.entries(typeCounts).map(([cls, count]) => (
+            <Button
+              key={cls}
+              variant={filterType === cls ? "default" : "outline"}
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setFilterType(filterType === cls ? "all" : cls)}
+            >
+              {classificationLabels[cls] || cls} ({count})
+            </Button>
+          ))}
+        </div>
+      )}
 
-              {/* Badges */}
-              <div className="mt-2 flex flex-wrap items-center gap-1">
-                <Badge variant="secondary" className="text-[10px]">p.{s.page_number + 1}</Badge>
-                <Badge variant="outline" className="text-[10px]">
-                  {classificationLabels[s.classification] || s.classification}
-                </Badge>
-                {s.annotated && (
-                  <Badge className="bg-emerald-100 text-emerald-800 text-[10px]">
-                    AI Annotated
+      {/* Schematic cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {filtered.map((s) => {
+          const style = diagramTypeStyles[s.classification] || { bg: "bg-slate-50", border: "", icon: "?" };
+          const isExpanded = expandedSchematic === s.page_id;
+          return (
+            <Card
+              key={s.page_id}
+              className={`overflow-hidden transition-all hover:shadow-md ${
+                s.annotated ? `${style.border} border-2` : ""
+              }`}
+            >
+              {/* Thumbnail with overlay */}
+              <div className={`relative ${style.bg}`}>
+                <button
+                  className="w-full"
+                  onClick={() => setExpandedSchematic(isExpanded ? null : s.page_id)}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`${apiBase}/api/manuals/${manualId}/pages/${s.page_number}/image`}
+                    alt={`Page ${s.page_number + 1}`}
+                    className="h-48 w-full object-contain p-2"
+                    loading="lazy"
+                  />
+                </button>
+
+                {/* Overlays */}
+                <div className="absolute left-2 top-2 flex items-center gap-1.5">
+                  <span className="rounded bg-black/60 px-2 py-0.5 text-xs font-bold text-white">
+                    p.{s.page_number + 1}
+                  </span>
+                  {s.annotated && (
+                    <Badge className="bg-emerald-500 text-white text-[10px] shadow">
+                      <Zap className="mr-0.5 h-2.5 w-2.5" /> AI
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Type icon */}
+                <div className="absolute right-2 top-2">
+                  <Badge className={`text-[10px] ${classificationColors[s.classification] || classificationColors.text}`}>
+                    {classificationLabels[s.classification] || s.classification}
                   </Badge>
-                )}
+                </div>
               </div>
 
-              {/* Annotation summary */}
-              {s.annotated && (
-                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                  <div className="flex justify-between">
-                    <span>Components</span>
-                    <span className="font-medium text-foreground">{s.component_count}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Connections</span>
-                    <span className="font-medium text-foreground">{s.connection_count}</span>
-                  </div>
-                  {s.confidence != null && (
-                    <div className="flex justify-between">
-                      <span>Confidence</span>
-                      <span className="font-medium text-foreground">{Math.round(s.confidence * 100)}%</span>
+              <CardContent className="p-3">
+                {/* Annotation stats row */}
+                {s.annotated ? (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="flex items-center gap-1">
+                        <Wrench className="h-3 w-3 text-muted-foreground" />
+                        <strong>{s.component_count}</strong> components
+                      </span>
+                      <span className="text-muted-foreground">|</span>
+                      <span>
+                        <strong>{s.connection_count}</strong> connections
+                      </span>
+                      {s.confidence != null && (
+                        <>
+                          <span className="text-muted-foreground">|</span>
+                          <span>{Math.round(s.confidence * 100)}%</span>
+                        </>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2"
+                      onClick={() => setExpandedSchematic(isExpanded ? null : s.page_id)}
+                    >
+                      {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Not yet annotated</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => router.push("/viewer")}
+                    >
+                      <Zap className="mr-1 h-3 w-3" /> Annotate
+                    </Button>
+                  </div>
+                )}
 
-              {/* Expanded: component list */}
-              {expandedSchematic === s.page_id && s.annotated && (
-                <div className="mt-3 space-y-2 border-t pt-3">
-                  {/* Full image */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`${apiBase}/api/manuals/${manualId}/pages/${s.page_number}/image`}
-                    alt={`Page ${s.page_number + 1} full`}
-                    className="max-h-[50vh] w-full rounded border object-contain"
-                  />
+                {/* Expanded detail panel */}
+                {isExpanded && (
+                  <div className="mt-3 space-y-3 border-t pt-3">
+                    {/* Full image */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`${apiBase}/api/manuals/${manualId}/pages/${s.page_number}/image`}
+                      alt={`Page ${s.page_number + 1} full`}
+                      className="max-h-[50vh] w-full rounded-lg border object-contain shadow-sm"
+                    />
 
-                  {/* Components table */}
-                  {s.components && s.components.length > 0 && (
-                    <div>
-                      <h4 className="mb-1 text-xs font-semibold">Components</h4>
-                      <div className="max-h-40 overflow-y-auto rounded border text-xs">
-                        <table className="w-full">
-                          <thead className="bg-slate-50">
-                            <tr>
-                              <th className="p-1.5 text-left font-medium">ID</th>
-                              <th className="p-1.5 text-left font-medium">Name</th>
-                              <th className="p-1.5 text-left font-medium">Type</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {s.components.map((c, i) => (
-                              <tr key={i} className="border-t">
-                                <td className="p-1.5 font-mono">{c.designator}</td>
-                                <td className="p-1.5">{c.name}</td>
-                                <td className="p-1.5 text-muted-foreground">{c.type}</td>
+                    {/* Components table */}
+                    {s.annotated && s.components && s.components.length > 0 && (
+                      <div>
+                        <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+                          <Wrench className="h-3 w-3" /> Components ({s.components.length})
+                        </h4>
+                        <div className="max-h-52 overflow-y-auto rounded-lg border shadow-inner">
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-slate-50">
+                              <tr>
+                                <th className="border-b p-2 text-left font-semibold">ID</th>
+                                <th className="border-b p-2 text-left font-semibold">Name</th>
+                                <th className="border-b p-2 text-left font-semibold">Type</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {s.components.map((c, i) => (
+                                <tr key={i} className="border-t hover:bg-slate-50">
+                                  <td className="p-2 font-mono font-medium">{c.designator}</td>
+                                  <td className="p-2">{c.name}</td>
+                                  <td className="p-2">
+                                    <Badge variant="outline" className="text-[10px] capitalize">
+                                      {c.type}
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Operating states */}
-                  {s.operating_states && s.operating_states.length > 0 && (
-                    <div>
-                      <h4 className="mb-1 text-xs font-semibold">Operating States</h4>
-                      <div className="space-y-1">
-                        {s.operating_states.map((os, i) => (
-                          <div key={i} className="rounded border p-2 text-xs">
-                            <span className="font-medium">{os.name}:</span>{" "}
-                            <span className="text-muted-foreground">{os.description}</span>
-                          </div>
-                        ))}
+                    {/* Operating states */}
+                    {s.annotated && s.operating_states && s.operating_states.length > 0 && (
+                      <div>
+                        <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+                          <Zap className="h-3 w-3" /> Operating States ({s.operating_states.length})
+                        </h4>
+                        <div className="space-y-1.5">
+                          {s.operating_states.map((os, i) => (
+                            <div key={i} className="flex items-start gap-2 rounded-lg border p-2.5 text-xs">
+                              <Badge variant="secondary" className="shrink-0 text-[10px]">{i + 1}</Badge>
+                              <div>
+                                <span className="font-semibold">{os.name}</span>
+                                <p className="mt-0.5 text-muted-foreground">{os.description}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
 
-              {/* Expand prompt for non-annotated */}
-              {expandedSchematic === s.page_id && !s.annotated && (
-                <div className="mt-3 border-t pt-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`${apiBase}/api/manuals/${manualId}/pages/${s.page_number}/image`}
-                    alt={`Page ${s.page_number + 1} full`}
-                    className="max-h-[50vh] w-full rounded border object-contain"
-                  />
-                  <p className="mt-2 text-center text-xs text-muted-foreground">
-                    AI annotation pending — use the Viewer for interactive analysis.
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+                    {/* View in Viewer button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => router.push("/viewer")}
+                    >
+                      <Eye className="mr-2 h-3.5 w-3.5" />
+                      Open in Interactive Viewer
+                    </Button>
+
+                    {!s.annotated && (
+                      <p className="text-center text-xs text-muted-foreground">
+                        Use the Viewer to run AI annotation on this diagram.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );
