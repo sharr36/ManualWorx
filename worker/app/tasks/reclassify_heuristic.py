@@ -34,18 +34,13 @@ async def reclassify_heuristic(ctx: dict, manual_id: str) -> dict:
     for p in pages:
         text = p["extracted_text"] or ""
         has_table = p["has_table"] or False
-
-        # Detect if this was a scanned page: if the page has substantial text
-        # but was classified as a schematic/diagram type, it's likely a
-        # scanned text page that was misclassified.
-        # More robust: check if has_diagram was set on a page with lots of text
-        # (real diagram pages typically have very little text).
         has_diagram = p["has_diagram"] or False
 
-        # For pages with significant text content (>200 chars), don't trust
-        # has_diagram — scanned pages always have has_diagram=True because
-        # the entire page is one big image.
-        if has_diagram and len(text.strip()) > 200:
+        # For pages with lots of text (>500 chars), don't trust has_diagram
+        # from scanned PDFs — the entire page is one image.
+        # But keep the threshold high enough that pages with moderate OCR text
+        # from labels/callouts on real schematics aren't wrongly stripped.
+        if has_diagram and len(text.strip()) > 500:
             has_diagram = False
 
         new_class = _classify_page(text, has_table, has_diagram)

@@ -1515,6 +1515,8 @@ const specCategoryColors: Record<string, string> = {
   clearance: "bg-amber-100 text-amber-800",
   capacity: "bg-purple-100 text-purple-800",
   electrical: "bg-yellow-100 text-yellow-800",
+  temperature: "bg-orange-100 text-orange-800",
+  speed: "bg-emerald-100 text-emerald-800",
   general: "bg-slate-100 text-slate-800",
 };
 

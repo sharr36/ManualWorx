@@ -202,7 +202,11 @@ _PARTS_KEYWORDS = re.compile(
 
 
 def _classify_page(text: str, has_table: bool, has_diagram: bool) -> str:
-    """Classify a page based on content heuristics."""
+    """Classify a page based on content heuristics.
+
+    For scanned pages, has_diagram will be False (entire page is one image).
+    We compensate by using keyword density to detect schematics from OCR text.
+    """
     text_stripped = text.strip()
     text_lower = text_stripped.lower()
     text_len = len(text_stripped)
@@ -221,17 +225,47 @@ def _classify_page(text: str, has_table: bool, has_diagram: bool) -> str:
     hydraulic_hits = len(_SCHEMATIC_KEYWORDS.findall(text))
     electrical_hits = len(_ELECTRICAL_KEYWORDS.findall(text))
 
-    # Hydraulic schematics — diagrams with hydraulic terms, or short text pages
-    # heavily dominated by hydraulic vocabulary
+    # --- Scanned-page schematic detection ---
+    # Scanned schematics have has_diagram=False but can be identified by:
+    # 1. High keyword density relative to total text
+    # 2. Short text (schematic labels only, not paragraphs)
+    # 3. Presence of component designators (V1, P2, M3, etc.)
+    has_designators = bool(re.search(
+        r"(?<![a-zA-Z])[A-Z]{1,3}\s*\d{1,3}(?!\d)", text
+    ))  # matches V1, P2, M3, SOL1, etc.
+
+    # Keyword density: how many schematic keywords per 100 chars
+    if text_len > 0:
+        hydraulic_density = (hydraulic_hits / text_len) * 100
+        electrical_density = (electrical_hits / text_len) * 100
+    else:
+        hydraulic_density = electrical_density = 0.0
+
+    # Hydraulic schematics — diagrams with hydraulic terms, or pages with
+    # strong hydraulic keyword signals (works for both native and scanned)
     if _SCHEMATIC_KEYWORDS.search(text) and has_diagram:
         return "hydraulic_schematic"
     if hydraulic_hits >= 3 and text_len < 800:
         return "hydraulic_schematic"
+    # Scanned schematic: high keyword density or designators + keywords
+    if not has_diagram and hydraulic_hits >= 2 and (
+        hydraulic_density > 0.3
+        or (has_designators and hydraulic_hits >= 2)
+        or (text_len < 400 and hydraulic_hits >= 2)
+    ):
+        return "hydraulic_schematic"
 
-    # Electrical diagrams
+    # Electrical diagrams — same logic adapted for scanned pages
     if _ELECTRICAL_KEYWORDS.search(text) and has_diagram:
         return "electrical_diagram"
     if electrical_hits >= 3 and text_len < 800:
+        return "electrical_diagram"
+    # Scanned schematic: high keyword density or designators + keywords
+    if not has_diagram and electrical_hits >= 2 and (
+        electrical_density > 0.3
+        or (has_designators and electrical_hits >= 2)
+        or (text_len < 400 and electrical_hits >= 2)
+    ):
         return "electrical_diagram"
 
     # Diagnostic flowcharts
@@ -250,7 +284,7 @@ def _classify_page(text: str, has_table: bool, has_diagram: bool) -> str:
         if has_table:
             return "parts_exploded_view"
 
-    # Wiring harness
+    # Wiring harness — electrical terms without diagram (pinout tables, etc.)
     if _ELECTRICAL_KEYWORDS.search(text) and not has_diagram:
         return "wiring_harness"
 
@@ -269,6 +303,17 @@ def _classify_page(text: str, has_table: bool, has_diagram: bool) -> str:
             return "hydraulic_schematic"
         if electrical_hits > 0:
             return "electrical_diagram"
+        return "general_illustration"
+
+    # Last resort for scanned pages: very short text with designators
+    # suggests a schematic where OCR only picked up labels
+    if not has_diagram and text_len < 300 and has_designators:
+        if hydraulic_hits > electrical_hits:
+            return "hydraulic_schematic"
+        if electrical_hits > 0:
+            return "electrical_diagram"
+        if hydraulic_hits > 0:
+            return "hydraulic_schematic"
         return "general_illustration"
 
     return "text"

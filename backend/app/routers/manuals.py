@@ -467,7 +467,8 @@ async def extract_specs(manual_id: UUID, request: Request) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail="Manual not found")
 
-    # Get pages likely to contain specs (torque tables, text pages with spec keywords)
+    # Get pages likely to contain specs — search ALL page types, not just text/torque
+    # Specs appear on text pages, schematic pages (callout labels), wiring pages, etc.
     async with pool.acquire() as conn:
         spec_pages = await conn.fetch(
             """
@@ -475,22 +476,19 @@ async def extract_specs(manual_id: UUID, request: Request) -> dict:
             FROM pages
             WHERE manual_id = $1
               AND extracted_text IS NOT NULL
+              AND LENGTH(TRIM(extracted_text)) > 30
               AND (
                 classification = 'torque_spec_table'
-                OR (
-                  classification = 'text'
-                  AND (
-                    extracted_text ILIKE '%torque%'
-                    OR extracted_text ILIKE '%clearance%'
-                    OR extracted_text ILIKE '%pressure%'
-                    OR extracted_text ILIKE '%specification%'
-                    OR extracted_text ILIKE '%capacity%'
-                    OR extracted_text ILIKE '%tolerance%'
-                  )
-                )
+                OR extracted_text ~* '(torque|ft[\.\s-]?lb|[Nn][\.\s]?[Mm]|in[\.\s-]?lb)'
+                OR extracted_text ~* '(clearance|tolerance|end\s*play|backlash|wear\s*limit)'
+                OR extracted_text ~* '(psi|bar|kpa|pressure|relief)'
+                OR extracted_text ~* '(volt|amp|ohm|resistance|battery)'
+                OR extracted_text ~* '(capacity|quart|liter|gallon|fluid)'
+                OR extracted_text ~* '(specification|rpm|temperature|°[FC])'
+                OR extracted_text ~* '(\d+\s*(ft[\.\s-]?lb|[Nn][\.\s]?[Mm]|psi|bar|volt|ohm|rpm|°[FC]|gpm|qt|[Ll]))'
               )
             ORDER BY page_number
-            LIMIT 30
+            LIMIT 50
             """,
             manual_id,
         )
@@ -514,19 +512,42 @@ async def extract_specs(manual_id: UUID, request: Request) -> dict:
     import anthropic
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    prompt = f"""Extract ALL technical specifications from this {row['make']} {row['model']} service manual text.
+    prompt = f"""You are a heavy equipment service manual expert. Extract EVERY technical specification from this {row['make'] or ''} {row['model'] or ''} service manual.
 
-Return a JSON array of specifications. Each spec should have:
-- "category": one of "torque", "pressure", "clearance", "capacity", "electrical", "general"
-- "component": what the spec applies to (e.g. "cylinder head bolts", "hydraulic system")
-- "spec": the value with units (e.g. "135 N·m (100 lb-ft)")
-- "conditions": any conditions or notes (e.g. "lubricated threads", "at operating temperature")
-- "page": the page number it came from
+IMPORTANT: Be thorough. A mechanic needs these specs to service the machine. Look for:
 
-Only include concrete numerical specifications. Do not infer values.
+TORQUE SPECS: bolt torques, fastener specs, tightening sequences, retorque values
+  - Look for: ft-lb, lb-ft, N·m, Nm, in-lb, "tighten to", "torque to"
+
+PRESSURES: hydraulic pressures, relief settings, charge pressures, test pressures
+  - Look for: psi, PSI, bar, kPa, MPa, "set at", "adjust to", "relief pressure"
+
+CLEARANCES: bearing clearances, end play, backlash, gear mesh, wear limits
+  - Look for: mm, in, thou, "clearance", "end play", "backlash", "wear limit"
+
+ELECTRICAL: battery voltage, alternator output, sensor values, resistance specs
+  - Look for: volt, V, amp, A, ohm, Ω, "resistance", "output"
+
+CAPACITIES: oil capacity, coolant, hydraulic reservoir, fuel tank, gear cases
+  - Look for: qt, quart, L, liter, gal, gallon, "capacity", "fill to"
+
+TEMPERATURES: operating temps, thermostat ratings, overheat thresholds
+  - Look for: °F, °C, "operating temperature"
+
+SPEEDS/FLOW: engine RPM, pump flow, PTO speed
+  - Look for: RPM, GPM, LPM, "idle speed", "rated speed"
+
+Return a JSON array. Each spec:
+- "category": "torque" | "pressure" | "clearance" | "capacity" | "electrical" | "temperature" | "speed" | "general"
+- "component": what it applies to (e.g. "cylinder head bolts", "main relief valve")
+- "spec": the exact value with units (e.g. "135 N·m (100 lb-ft)")
+- "conditions": any conditions (e.g. "lubricated", "at operating temp", "Stage 1") or null
+- "page": the page number
+
+Only include values explicitly stated in the text. Do not guess.
 
 TEXT:
-{combined_text[:12000]}
+{combined_text[:16000]}
 
 Return ONLY a JSON array. No markdown, no explanation."""
 
