@@ -31,7 +31,7 @@ async def annotate_diagram(body: AnnotateRequest, request: Request) -> Annotatio
 
     try:
         result = await _service.annotate_diagram(
-            pool, tenant_id, body.page_id, body.diagram_type
+            pool, tenant_id, body.page_id, body.diagram_type, force=body.force
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -3,10 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
+  Eye,
+  EyeOff,
   Image,
   Loader2,
+  Maximize2,
+  Minimize2,
+  Minus,
   MousePointer,
   Move,
+  Plus,
+  RotateCcw,
   Search,
   ZapOff,
   Zap,
@@ -58,6 +65,10 @@ const COMPONENT_TYPE_ICONS: Record<string, string> = {
   connector: "X",
   fuse: "Fu",
   resistor: "Rs",
+  battery: "B",
+  alternator: "Alt",
+  starter: "St",
+  light: "L",
   other: "?",
 };
 
@@ -87,8 +98,14 @@ export default function ViewerPage() {
   const [activeLayer, setActiveLayer] = useState("");
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState("");
+  const [spaceHeld, setSpaceHeld] = useState(false);
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const canvasRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   // Load diagram pages
   useEffect(() => {
@@ -124,6 +141,18 @@ export default function ViewerPage() {
     }
   }, []);
 
+  const fitToWidth = useCallback(() => {
+    if (canvasRef.current && imgRef.current) {
+      const containerW = canvasRef.current.clientWidth;
+      const fitZoom = Math.min(
+        (containerW / imgRef.current.naturalWidth) * 100,
+        100
+      );
+      setZoom(Math.round(fitZoom));
+      setPan({ x: 0, y: 0 });
+    }
+  }, []);
+
   const handleSelectPage = useCallback(
     (page: DiagramPageItem) => {
       setSelectedPage(page);
@@ -141,9 +170,9 @@ export default function ViewerPage() {
     try {
       const result = await api.post<DiagramAnnotation>("/api/viewer/annotate", {
         page_id: selectedPage.page_id,
+        force: true,
       }, { timeout: 120_000 });
       setAnnotation(result);
-      // Update the page list to show annotated
       setDiagramPages((prev) =>
         prev.map((p) =>
           p.page_id === selectedPage.page_id
@@ -159,11 +188,34 @@ export default function ViewerPage() {
     }
   };
 
-  // Pan handling
+  // Center view on a component
+  const centerOnComponent = useCallback((comp: DiagramComponent) => {
+    if (!canvasRef.current || !imgRef.current) return;
+    const container = canvasRef.current;
+    const img = imgRef.current;
+    const scale = zoom / 100;
+
+    // Component center in pixel coords
+    const cx = (comp.bbox_pct[0] + comp.bbox_pct[2] / 2) / 100 * img.naturalWidth * scale;
+    const cy = (comp.bbox_pct[1] + comp.bbox_pct[3] / 2) / 100 * img.naturalHeight * scale;
+
+    // Center of container
+    const viewCx = container.clientWidth / 2;
+    const viewCy = container.clientHeight / 2;
+
+    setPan({ x: viewCx - cx, y: viewCy - cy });
+  }, [zoom]);
+
+  // Pan handling — works in pan mode or when Space is held
+  const canPan = mode === "pan" || spaceHeld;
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (mode !== "pan") return;
-    setIsPanning(true);
-    panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    // Middle-click always pans
+    if (e.button === 1 || canPan) {
+      e.preventDefault();
+      setIsPanning(true);
+      panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -176,19 +228,123 @@ export default function ViewerPage() {
 
   const handleMouseUp = () => setIsPanning(false);
 
+  // Scroll wheel zoom (toward cursor)
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const container = canvasRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const delta = e.deltaY > 0 ? -10 : 10;
+    const newZoom = Math.max(10, Math.min(500, zoom + delta));
+    const scaleFactor = newZoom / zoom;
+
+    // Adjust pan so zoom centers on cursor
+    const newPanX = mouseX - (mouseX - pan.x) * scaleFactor;
+    const newPanY = mouseY - (mouseY - pan.y) * scaleFactor;
+
+    setZoom(newZoom);
+    setPan({ x: newPanX, y: newPanY });
+  }, [zoom, pan]);
+
+  useEffect(() => {
+    const container = canvasRef.current;
+    if (!container) return;
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't capture when typing in inputs
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+
+      switch (e.key) {
+        case "Escape":
+          setSelectedComponent(null);
+          setSelectedState(null);
+          break;
+        case "+":
+        case "=":
+          e.preventDefault();
+          setZoom((z) => Math.min(500, z + 25));
+          break;
+        case "-":
+          e.preventDefault();
+          setZoom((z) => Math.max(10, z - 25));
+          break;
+        case "0":
+          e.preventDefault();
+          fitToWidth();
+          break;
+        case "f":
+        case "F":
+          e.preventDefault();
+          toggleFullscreen();
+          break;
+        case "o":
+        case "O":
+          e.preventDefault();
+          setShowOverlay((v) => !v);
+          break;
+        case " ":
+          e.preventDefault();
+          setSpaceHeld(true);
+          break;
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === " ") {
+        setSpaceHeld(false);
+        setIsPanning(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [fitToWidth]);
+
+  // Fullscreen toggle
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    } else {
+      containerRef.current.requestFullscreen();
+      setIsFullscreen(true);
+    }
+  };
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
   // Get line color based on type and diagram context
   const getLineColor = (lineType: string) => {
-    const isElectrical = annotation?.diagram_type === "electrical" || annotation?.diagram_type === "wiring";
-    const colors = isElectrical ? ELECTRICAL_COLORS : HYDRAULIC_COLORS;
+    const elec = annotation?.diagram_type === "electrical" || annotation?.diagram_type === "wiring";
+    const colors = elec ? ELECTRICAL_COLORS : HYDRAULIC_COLORS;
     return colors[lineType] || "#A0AEC0";
   };
 
-  // Filter components by search
+  // Filter components by search + type
   const filteredComponents = annotation?.annotation_data?.components?.filter(
     (c) =>
-      !searchTerm ||
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.designator.toLowerCase().includes(searchTerm.toLowerCase())
+      (!searchTerm ||
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.designator.toLowerCase().includes(searchTerm.toLowerCase())) &&
+      (!typeFilter || c.type === typeFilter)
   );
 
   // Filter connections by active layer
@@ -198,6 +354,11 @@ export default function ViewerPage() {
 
   // Determine which components are active in current state
   const activeComponentIds = new Set(selectedState?.active_components || []);
+
+  // Unique component types for filter
+  const componentTypes = annotation
+    ? [...new Set(annotation.annotation_data.components.map((c) => c.type))].sort()
+    : [];
 
   // Layer options based on diagram type
   const isElectrical = annotation?.diagram_type === "electrical" || annotation?.diagram_type === "wiring";
@@ -217,48 +378,106 @@ export default function ViewerPage() {
         { value: "drain", label: "Drain" },
       ];
 
+  const cursorStyle = isPanning
+    ? "grabbing"
+    : canPan
+      ? "grab"
+      : mode === "select"
+        ? "crosshair"
+        : "default";
+
   return (
-    <div className="space-y-4">
+    <div ref={containerRef} className={`space-y-2 ${isFullscreen ? "bg-white p-2" : ""}`}>
       {/* Toolbar */}
-      <div className="flex items-center gap-3 rounded-lg border bg-white p-3">
-        <div className="flex items-center gap-2">
-          <label htmlFor="zoom-slider" className="text-xs text-muted-foreground">Zoom</label>
-          <input
-            id="zoom-slider"
-            type="range"
-            min="25"
-            max="300"
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-            className="w-24"
-            aria-label="Zoom level"
-          />
-          <span className="w-10 text-xs text-muted-foreground">{zoom}%</span>
+      <div className="flex items-center gap-2 rounded-lg border bg-white p-2 flex-wrap">
+        {/* Zoom controls */}
+        <div className="flex items-center gap-1 border-r pr-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => setZoom((z) => Math.max(10, z - 25))}
+            title="Zoom out (-)"
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </Button>
+          <button
+            className="w-12 text-center text-xs font-medium tabular-nums hover:bg-slate-100 rounded px-1 py-0.5"
+            onClick={fitToWidth}
+            title="Fit to width (0)"
+          >
+            {zoom}%
+          </button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => setZoom((z) => Math.min(500, z + 25))}
+            title="Zoom in (+)"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => { setZoom(100); setPan({ x: 0, y: 0 }); }}
+            title="Reset view"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
         </div>
 
+        {/* Mode toggle */}
         <div className="flex rounded-md border">
           <Button
             variant={mode === "select" ? "default" : "ghost"}
             size="sm"
+            className="h-7 px-2"
             onClick={() => setMode("select")}
-            title="Select mode"
-            aria-label="Select mode"
+            title="Select mode (hold Space to pan)"
           >
             <MousePointer className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant={mode === "pan" ? "default" : "ghost"}
             size="sm"
+            className="h-7 px-2"
             onClick={() => setMode("pan")}
             title="Pan mode"
-            aria-label="Pan mode"
           >
             <Move className="h-3.5 w-3.5" />
           </Button>
         </div>
 
+        {/* Overlay toggle */}
+        <Button
+          variant={showOverlay ? "default" : "outline"}
+          size="sm"
+          className="h-7 px-2"
+          onClick={() => setShowOverlay((v) => !v)}
+          title={`${showOverlay ? "Hide" : "Show"} annotations (O)`}
+          disabled={!annotation}
+        >
+          {showOverlay ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+        </Button>
+
+        {/* Fullscreen */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 p-0"
+          onClick={toggleFullscreen}
+          title="Fullscreen (F)"
+        >
+          {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+        </Button>
+
+        <div className="h-5 w-px bg-border" />
+
+        {/* Layer filter */}
         <select
-          className="rounded-md border px-2 py-1 text-sm"
+          className="rounded-md border px-2 py-1 text-xs h-7"
           value={activeLayer}
           onChange={(e) => setActiveLayer(e.target.value)}
           disabled={!annotation}
@@ -270,8 +489,9 @@ export default function ViewerPage() {
           ))}
         </select>
 
+        {/* State filter */}
         <select
-          className="rounded-md border px-2 py-1 text-sm"
+          className="rounded-md border px-2 py-1 text-xs h-7"
           value={selectedState?.id || ""}
           onChange={(e) => {
             const state = annotation?.operating_states?.find(
@@ -289,25 +509,52 @@ export default function ViewerPage() {
           ))}
         </select>
 
+        {/* Type filter */}
+        {componentTypes.length > 0 && (
+          <select
+            className="rounded-md border px-2 py-1 text-xs h-7"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+          >
+            <option value="">All types</option>
+            {componentTypes.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        )}
+
         <div className="flex-1" />
 
+        {/* Search */}
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
           <input
             placeholder="Find component..."
             aria-label="Search components"
-            className="rounded-md border py-1 pl-7 pr-2 text-sm"
+            className="rounded-md border py-1 pl-7 pr-2 text-xs h-7"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             disabled={!annotation}
           />
         </div>
+
+        {/* Keyboard hints */}
+        <div className="hidden lg:flex items-center gap-1 text-[10px] text-muted-foreground border-l pl-2">
+          <kbd className="rounded border bg-slate-50 px-1">Scroll</kbd>
+          <span>zoom</span>
+          <kbd className="rounded border bg-slate-50 px-1 ml-1">Space</kbd>
+          <span>pan</span>
+          <kbd className="rounded border bg-slate-50 px-1 ml-1">Esc</kbd>
+          <span>deselect</span>
+        </div>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex gap-3">
         {/* Diagram selector sidebar */}
-        <div className="w-56 shrink-0 space-y-2 overflow-y-auto" style={{ maxHeight: "calc(100vh - 220px)" }}>
-          <h3 className="text-sm font-semibold">Diagrams</h3>
+        <div className="w-52 shrink-0 space-y-1.5 overflow-y-auto" style={{ maxHeight: isFullscreen ? "calc(100vh - 80px)" : "calc(100vh - 200px)" }}>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Diagrams</h3>
           {loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -362,13 +609,14 @@ export default function ViewerPage() {
               ref={canvasRef}
               className="relative overflow-hidden rounded-lg border bg-slate-50"
               style={{
-                height: "calc(100vh - 220px)",
-                cursor: mode === "pan" ? (isPanning ? "grabbing" : "grab") : "default",
+                height: isFullscreen ? "calc(100vh - 80px)" : "calc(100vh - 200px)",
+                cursor: cursorStyle,
               }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
+              onContextMenu={(e) => e.preventDefault()}
             >
               {/* Image + overlay container */}
               <div
@@ -381,26 +629,16 @@ export default function ViewerPage() {
                 {/* Page image */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
+                  ref={imgRef}
                   src={`${apiBase}/api/manuals/${selectedPage.manual_id}/pages/${selectedPage.page_number}/image`}
                   alt={`Page ${selectedPage.page_number + 1}`}
                   className="max-w-none"
                   draggable={false}
-                  onLoad={(e) => {
-                    const img = e.target as HTMLImageElement;
-                    // Auto-fit zoom on load
-                    if (canvasRef.current) {
-                      const containerW = canvasRef.current.clientWidth;
-                      const fitZoom = Math.min(
-                        (containerW / img.naturalWidth) * 100,
-                        100
-                      );
-                      setZoom(Math.round(fitZoom));
-                    }
-                  }}
+                  onLoad={() => fitToWidth()}
                 />
 
                 {/* SVG overlay for annotations */}
-                {annotation && (
+                {annotation && showOverlay && (
                   <svg
                     className="absolute inset-0"
                     style={{ width: "100%", height: "100%", pointerEvents: "none" }}
@@ -427,7 +665,6 @@ export default function ViewerPage() {
                         (activeComponentIds.has(conn.from_id) &&
                           activeComponentIds.has(conn.to_id));
 
-                      // Build path: component center → waypoints → component center
                       const fromX = fromComp.bbox_pct[0] + fromComp.bbox_pct[2] / 2;
                       const fromY = fromComp.bbox_pct[1] + fromComp.bbox_pct[3] / 2;
                       const toX = toComp.bbox_pct[0] + toComp.bbox_pct[2] / 2;
@@ -436,13 +673,11 @@ export default function ViewerPage() {
                       const waypoints = conn.waypoints;
                       let pathD: string;
                       if (waypoints && waypoints.length >= 2) {
-                        // Use waypoints for circuit tracing
                         pathD = `M ${waypoints[0][0]} ${waypoints[0][1]}`;
                         for (let w = 1; w < waypoints.length; w++) {
                           pathD += ` L ${waypoints[w][0]} ${waypoints[w][1]}`;
                         }
                       } else {
-                        // Fallback: straight line between component centers
                         pathD = `M ${fromX} ${fromY} L ${toX} ${toY}`;
                       }
 
@@ -463,7 +698,6 @@ export default function ViewerPage() {
                             strokeLinecap="round"
                             strokeLinejoin="round"
                           />
-                          {/* Wire label on selected connections */}
                           {isSelectedConn && conn.label && waypoints && waypoints.length >= 2 && (
                             <text
                               x={waypoints[Math.floor(waypoints.length / 2)][0]}
@@ -499,7 +733,6 @@ export default function ViewerPage() {
                             .toLowerCase()
                             .includes(searchTerm.toLowerCase()));
 
-                      // Determine styling based on state
                       let strokeColor = "rgba(99, 102, 241, 0.3)";
                       let fillColor = "rgba(99, 102, 241, 0.04)";
                       let strokeW = 0.12;
@@ -534,10 +767,9 @@ export default function ViewerPage() {
                           style={{ pointerEvents: "all", cursor: "pointer" }}
                           opacity={isActive ? 1 : 0.25}
                           onClick={() => {
-                            if (mode === "select") setSelectedComponent(comp);
+                            if (mode === "select" || !canPan) setSelectedComponent(comp);
                           }}
                         >
-                          {/* Bounding box */}
                           <rect
                             x={comp.bbox_pct[0]}
                             y={comp.bbox_pct[1]}
@@ -548,7 +780,6 @@ export default function ViewerPage() {
                             strokeWidth={strokeW}
                             rx={0.2}
                           />
-                          {/* Designator label above bbox */}
                           <rect
                             x={labelX - labelWidth / 2}
                             y={labelY - labelHeight / 2}
@@ -578,11 +809,26 @@ export default function ViewerPage() {
               </div>
 
               {/* Annotate button overlay */}
-              {!annotation && !annotating && (
+              {!annotation && !annotating && !annotationError && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/5">
                   <Button onClick={handleAnnotate} size="lg">
                     <Zap className="mr-2 h-4 w-4" />
                     Annotate with AI
+                  </Button>
+                </div>
+              )}
+
+              {/* Re-annotate button (top-right when annotation exists) */}
+              {annotation && !annotating && (
+                <div className="absolute top-3 right-3 flex gap-2">
+                  <Button
+                    onClick={handleAnnotate}
+                    size="sm"
+                    variant="outline"
+                    className="bg-white/90 shadow-sm text-xs"
+                  >
+                    <RotateCcw className="mr-1.5 h-3 w-3" />
+                    Re-annotate
                   </Button>
                 </div>
               )}
@@ -643,7 +889,7 @@ export default function ViewerPage() {
         </div>
 
         {/* Component info side panel */}
-        <div className="hidden w-64 shrink-0 space-y-4 xl:block">
+        <div className="hidden w-64 shrink-0 space-y-3 xl:block overflow-y-auto" style={{ maxHeight: isFullscreen ? "calc(100vh - 80px)" : "calc(100vh - 200px)" }}>
           <Card>
             <CardContent className="p-4">
               <h3 className="mb-3 font-semibold">Component Info</h3>
@@ -684,7 +930,6 @@ export default function ViewerPage() {
                     </div>
                   )}
 
-                  {/* Show connections for this component */}
                   {annotation && (
                     <div className="space-y-1">
                       <p className="text-xs font-medium text-muted-foreground">
@@ -711,19 +956,27 @@ export default function ViewerPage() {
                               className="flex items-center gap-1 text-xs"
                             >
                               <div
-                                className="h-2 w-2 rounded-full"
+                                className="h-2 w-2 rounded-full shrink-0"
                                 style={{
                                   backgroundColor: getLineColor(conn.line_type),
                                 }}
                               />
-                              <span className="text-muted-foreground">
+                              <span className="text-muted-foreground truncate">
                                 {conn.line_type}
                               </span>
+                              {conn.label && (
+                                <span className="text-muted-foreground font-mono text-[10px]">
+                                  ({conn.label})
+                                </span>
+                              )}
                               <span>→</span>
                               <button
-                                className="font-medium text-emerald-600 hover:underline"
+                                className="font-medium text-emerald-600 hover:underline truncate"
                                 onClick={() => {
-                                  if (other) setSelectedComponent(other);
+                                  if (other) {
+                                    setSelectedComponent(other);
+                                    centerOnComponent(other);
+                                  }
                                 }}
                               >
                                 {other?.designator || otherId}
@@ -733,6 +986,15 @@ export default function ViewerPage() {
                         })}
                     </div>
                   )}
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs"
+                    onClick={() => centerOnComponent(selectedComponent)}
+                  >
+                    Center on component
+                  </Button>
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
@@ -783,24 +1045,30 @@ export default function ViewerPage() {
             <Card>
               <CardContent className="p-4">
                 <h3 className="mb-2 text-sm font-semibold">
-                  Components ({annotation.component_count})
+                  Components ({filteredComponents?.length || 0}{typeFilter ? ` / ${annotation.component_count}` : ""})
                 </h3>
                 <div
-                  className="space-y-1 overflow-y-auto"
-                  style={{ maxHeight: "200px" }}
+                  className="space-y-0.5 overflow-y-auto"
+                  style={{ maxHeight: "250px" }}
                 >
-                  {annotation.annotation_data.components.map((comp) => (
+                  {(filteredComponents || []).map((comp) => (
                     <button
                       key={comp.id}
-                      className={`w-full rounded px-2 py-1 text-left text-xs transition-colors ${
+                      className={`w-full rounded px-2 py-1 text-left text-xs transition-colors flex items-center gap-1.5 ${
                         selectedComponent?.id === comp.id
                           ? "bg-emerald-50 text-emerald-800"
                           : "hover:bg-slate-50"
                       }`}
-                      onClick={() => setSelectedComponent(comp)}
+                      onClick={() => {
+                        setSelectedComponent(comp);
+                        centerOnComponent(comp);
+                      }}
                     >
+                      <span className="shrink-0 w-5 h-5 flex items-center justify-center rounded bg-slate-100 text-[9px] font-bold">
+                        {COMPONENT_TYPE_ICONS[comp.type] || "?"}
+                      </span>
                       <span className="font-medium">{comp.designator}</span>
-                      <span className="ml-1 text-muted-foreground">{comp.name}</span>
+                      <span className="text-muted-foreground truncate">{comp.name}</span>
                     </button>
                   ))}
                 </div>

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class AnnotateRequest(BaseModel):
     page_id: str
     diagram_type: str | None = None
+    force: bool = False
 
 
 class AnnotationResponse(BaseModel):

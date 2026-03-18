@@ -13,25 +13,27 @@ _ai = AIService()
 class ViewerService:
     """Handles diagram annotation, schematic generation, and component location."""
 
-    async def annotate_diagram(self, pool, tenant_id, page_id, diagram_type=None):
+    async def annotate_diagram(self, pool, tenant_id, page_id, diagram_type=None, force=False):
         """Trigger AI annotation for a diagram page.
 
-        If a cached annotation exists and is fresh, returns it.
+        If a cached annotation exists and is fresh, returns it (unless force=True).
         Otherwise calls Claude Vision for a new annotation.
         """
         page_uuid = UUID(page_id) if isinstance(page_id, str) else page_id
 
         async with pool.acquire() as conn:
-            # Check for cached annotation
-            existing = await conn.fetchrow(
-                """SELECT id, diagram_type, annotation_data, component_count,
-                          connection_count, operating_states, confidence_overall,
-                          generated_at
-                   FROM diagram_annotations
-                   WHERE page_id = $1 AND tenant_id = $2""",
-                page_uuid,
-                tenant_id,
-            )
+            # Check for cached annotation (skip if force re-annotate)
+            existing = None
+            if not force:
+                existing = await conn.fetchrow(
+                    """SELECT id, diagram_type, annotation_data, component_count,
+                              connection_count, operating_states, confidence_overall,
+                              generated_at
+                       FROM diagram_annotations
+                       WHERE page_id = $1 AND tenant_id = $2""",
+                    page_uuid,
+                    tenant_id,
+                )
 
             if existing:
                 annotation_data = (
