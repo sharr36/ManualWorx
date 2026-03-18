@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     # AI
     ANTHROPIC_API_KEY: str = ""
     DEFAULT_MODEL: str = "claude-sonnet-4-5-20250929"
-    ESCALATION_MODEL: str = "claude-opus-4-5-20250120"
-    ANNOTATION_MODEL: str = "claude-opus-4-5-20250120"
+    ESCALATION_MODEL: str = "claude-opus-4-5-20251101"
+    ANNOTATION_MODEL: str = "claude-opus-4-5-20251101"
 
     # Object storage (Tigris / S3-compatible)
     AWS_ENDPOINT_URL_S3: str = ""
