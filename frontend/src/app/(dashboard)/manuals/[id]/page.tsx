@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft,
   BookOpen,
   ChevronDown,
   ChevronRight,
@@ -249,23 +248,8 @@ export default function ManualDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => router.push("/manuals")}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold">{manual.title}</h1>
-          <p className="text-sm text-muted-foreground">
-            {manual.make} {manual.model}
-            {manual.total_pages && ` \u00B7 ${manual.total_pages} pages`}
-            {" \u00B7 "}
-            {formatDate(manual.created_at)}
-          </p>
-        </div>
-        <Badge className={statusColors[manual.upload_status] || "bg-slate-400"}>
-          {manual.upload_status}
-        </Badge>
+      {/* Actions */}
+      <div className="flex items-center gap-2">
         {manual.upload_status === "ready" && (
           <Button
             variant="outline"
@@ -278,7 +262,7 @@ export default function ManualDetailPage() {
             ) : (
               <RefreshCw className="mr-2 h-3.5 w-3.5" />
             )}
-            Reclassify
+            Reclassify Pages
           </Button>
         )}
         <Button variant="ghost" size="icon" onClick={handleDelete}>

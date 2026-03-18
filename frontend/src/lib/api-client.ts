@@ -143,7 +143,7 @@ class ApiClient {
     return this.request<T>(path, { method: "GET" });
   }
 
-  post<T>(path: string, body?: unknown, config?: { timeout?: number }) {
+  post<T>(path: string, body?: unknown, config?: { timeout?: number; retries?: number }) {
     return this.request<T>(path, {
       method: "POST",
       body: body ? JSON.stringify(body) : undefined,

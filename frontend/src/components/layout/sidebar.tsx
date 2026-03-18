@@ -3,14 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3,
   BookOpen,
   CreditCard,
   FileText,
   GraduationCap,
-  Image,
   LayoutDashboard,
-  MessageSquare,
   Settings,
   Shield,
   Users,
@@ -31,8 +28,6 @@ interface SidebarProps {
 const mainNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/manuals", label: "Manuals", icon: BookOpen },
-  { href: "/query", label: "Query", icon: MessageSquare },
-  { href: "/viewer", label: "Viewer", icon: Image },
   { href: "/teach", label: "Teach", icon: GraduationCap },
   { href: "/documents", label: "Documents", icon: FileText },
 ];
