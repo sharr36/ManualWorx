@@ -118,7 +118,7 @@ async def annotate_diagram(ctx: dict, page_id: str) -> dict:
 
     start = time.monotonic()
     response = await client.messages.create(
-        model=config.CLASSIFICATION_MODEL,
+        model=config.AI_MODEL,
         max_tokens=4096,
         messages=[
             {
@@ -190,7 +190,7 @@ async def annotate_diagram(ctx: dict, page_id: str) -> dict:
             len(components),
             len(connections),
             json.dumps(operating_states),
-            config.CLASSIFICATION_MODEL,
+            config.AI_MODEL,
             confidence,
         )
 

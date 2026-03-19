@@ -12,7 +12,6 @@ from manualworx_shared.config import arq_redis_settings
 
 from .config import WorkerSettings as Config
 from .tasks.annotate_diagram import annotate_diagram
-from .tasks.classify_pages import classify_pages
 from .tasks.generate_embeddings import generate_embeddings
 from .tasks.generate_learning_path import generate_learning_path
 from .tasks.ingest_manual import ingest_manual
@@ -131,7 +130,6 @@ class WorkerSettings:
         ingest_manual,
         process_page,
         generate_embeddings,
-        classify_pages,
         annotate_diagram,
         generate_learning_path,
     ]

@@ -191,19 +191,6 @@ async def ingest_manual(ctx: dict, manual_id: str, tenant_id: str) -> dict:
                 UUID(manual_id),
             )
 
-        # 8. Enqueue AI page classification (refines heuristic results in background)
-        page_ids_for_classify = [p["page_id"] for p in pages_data]
-        if page_ids_for_classify:
-            try:
-                from arq.connections import ArqRedis
-                arq_redis: ArqRedis | None = ctx.get("redis")
-                if arq_redis:
-                    await arq_redis.enqueue_job(
-                        "classify_pages", manual_id, page_ids_for_classify
-                    )
-            except Exception as e:
-                logger.warning("Failed to enqueue classification job: %s", e)
-
         return {
             "status": "ready",
             "manual_id": manual_id,

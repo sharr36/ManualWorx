@@ -93,7 +93,7 @@ Return JSON only:
 ```"""
 
     response = await client.messages.create(
-        model=settings.CLASSIFICATION_MODEL,
+        model=settings.AI_MODEL,
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
     )
