@@ -22,11 +22,12 @@ RUN pip install --no-cache-dir \
 COPY worker/app/ /app/app/
 
 # Verify all imports work at build time (catches missing deps early)
-RUN python -c "from app.pipeline.ocr_processor import OCRProcessor; \
+RUN python -c "import fitz; print(f'PyMuPDF {fitz.version_bind} OK'); \
+from app.pipeline.ocr_processor import OCRProcessor; \
 from app.pipeline.pdf_splitter import PDFSplitter; \
 from app.pipeline.chunker import Chunker; \
 from app.pipeline.embedder import Embedder; \
-print('All imports OK')"
+print('All worker imports OK')"
 
 RUN useradd -r -s /bin/false appuser
 

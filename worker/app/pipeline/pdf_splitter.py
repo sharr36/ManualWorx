@@ -2,8 +2,6 @@
 
 from dataclasses import dataclass
 
-import fitz
-
 
 @dataclass
 class PageImage:
@@ -22,6 +20,8 @@ class PDFSplitter:
 
     def get_page_count(self, pdf_bytes: bytes) -> int:
         """Get the number of pages in a PDF."""
+        import fitz
+
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         count = len(doc)
         doc.close()
@@ -36,6 +36,8 @@ class PDFSplitter:
         Returns:
             List of PageImage objects with PNG image bytes.
         """
+        import fitz
+
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         pages = []
         mat = fitz.Matrix(self._zoom, self._zoom)
@@ -58,6 +60,8 @@ class PDFSplitter:
 
     def extract_page_text(self, pdf_bytes: bytes, page_number: int) -> str:
         """Extract raw text from a specific page."""
+        import fitz
+
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         if page_number >= len(doc):
             doc.close()

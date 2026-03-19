@@ -3,8 +3,6 @@
 import asyncio
 import re
 
-import fitz
-
 
 # Heuristic patterns for page classification
 _TABLE_PATTERNS = re.compile(r"(\|\s*\w+\s*\|)|(\d+\s*[Nn]\.?[Mm])|(\d+\s*ft[\.\s-]?lb)")
@@ -31,6 +29,8 @@ class OCRProcessor:
         Returns:
             Dict with page_number, text, has_table, has_diagram, classification, confidence.
         """
+        import fitz
+
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         if page_number >= len(doc):
             doc.close()
